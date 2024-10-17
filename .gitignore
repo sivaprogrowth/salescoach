@@ -1,6 +1,7 @@
 .env
 *json
 *ipynb
+*.wav
 __pycache__
 vpoc/
 .vscode/

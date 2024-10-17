@@ -4,11 +4,15 @@ from util import *
 import queue
 import sounddevice as sd
 import numpy as np
+from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
+from pdfminer.converter import TextConverter
+from pdfminer.layout import LAParams
+from pdfminer.pdfpage import PDFPage
+from io import StringIO
 
 
 user_id = 'shariq'
 sample_rate = 44100
-# audio_queue = queue.Queue()
 
 def audio_callback(indata, frames, time, status):
     global audio_queue
@@ -27,10 +31,47 @@ def stop_recording(stream):
     stream.stop()
     stream.close()
 
+@st.cache_data
+def convert_pdf_to_txt_file(path):
+    rsrcmgr = PDFResourceManager()
+    retstr = StringIO()
+    laparams = LAParams()
+    device = TextConverter(rsrcmgr, retstr, laparams=laparams)
+    interpreter = PDFPageInterpreter(rsrcmgr, device)
+    
+    file_pages = PDFPage.get_pages(path)
+    nbPages = len(list(file_pages))
+    for page in PDFPage.get_pages(path):
+        interpreter.process_page(page)
+        t = retstr.getvalue()
+
+    device.close()
+    retstr.close()
+    return t 
+
+# Custom CSS for styling
 st.markdown("""
     <style>
+    /* Set background color */
+    body {
+        background-color: #FFFFFF;
+    }
+    /* Customize primary color elements */
+    .stButton>button {
+        background-color: #FF7500;
+        color: white;
+        border-radius: 8px;
+        font-size: 16px;
+    }
+    .stTextInput>div>input {
+        background-color: white;
+        color: #000000; /* Input text color */
+        border: 2px solid #FF7500; /* Input border color */
+        border-radius: 5px;
+    }
+    /* User and AI message bubbles */
     .user-message {
-        background-color: #d1e7dd;
+        background-color: #FF7500;
         border-radius: 10px;
         padding: 8px;
         text-align: left;
@@ -38,9 +79,10 @@ st.markdown("""
         float: right;
         margin-bottom: 10px;
         clear: both;
+        color: #FFFFFF;
     }
     .ai-message {
-        background-color: #f8d7da;
+        background-color: #4F6D7A;
         border-radius: 10px;
         padding: 8px;
         text-align: left;
@@ -48,6 +90,7 @@ st.markdown("""
         float: left;
         margin-bottom: 10px;
         clear: both;
+        color: #FFFFFF;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -57,35 +100,31 @@ if 'start' not in st.session_state:
 if 'stream' not in st.session_state:
     st.session_state['stream'] = None
 
-
 # Step 1: Drop-down Selector
 NEW_INDEX = "(New index)"
-# Layout for the form 
 options = get_index_list().names() + [NEW_INDEX]
 option = st.selectbox("Select an option", options)
 
-# Just to show the selected option
 if option == NEW_INDEX:
     otherOption = st.text_input("Enter your other option...")
     if otherOption:
         selection = otherOption
         index_init(otherOption, 1536)
         st.info(f":white_check_mark: New index {otherOption} created! ")
-    # Step 2: File Upload Block
+
     uploaded_file = st.file_uploader("Upload a file", type=["txt", "pdf", "docx"])
     if uploaded_file is not None:
         st.write("File uploaded successfully!")
         if st.button("Send File"):
-            # Send file to dummy API
-            files = {'file': uploaded_file}
-            # response = requests.post("https://0.0.0.0:8000/upload_file", files=files,json={"Index": option})
-            # st.write(f"File upload status: {response.status_code}")
+            name = uploaded_file.name
+            raw_text = convert_pdf_to_txt_file(uploaded_file)
+            response = requests.post("http://localhost:8000/createQuestionAnswer",json={"index": option, "text": raw_text})
+            st.write(f"File upload status: {response.status_code}")
     option = otherOption
 st.write(f"Selected option: {option}")
 
 if st.button('Start Test'):
     st.session_state['start']=True
-
 
 if st.session_state['start']:
 
@@ -94,7 +133,6 @@ if st.session_state['start']:
     
     response = requests.get(f"http://0.0.0.0:8000/fetch_chats/",json={'index':option,'user_id':'shariq'}).json()
     st.session_state['chat_history'] = response['chat']
-    # st.success("Chat history fetched successfully!")
 
     if st.button("Start Recording"):
         response = requests.post("http://0.0.0.0:8000//start-recording")
@@ -103,51 +141,19 @@ if st.session_state['start']:
         else:
             st.write("Failed to start recording.")
 
-
     if st.button("Stop Recording"):
-        
         response = requests.post(f"http://0.0.0.0:8000/stopRecording/",json={'index':option})
-        # response = response.json()
         if response.status_code == 200:
             result = response.json()
-            print(result)
-            # st.write(result['message'])
             st.session_state['chat_history'] = result['chat']
         else:
             st.write("Failed to stop recording.")
 
-
     # Display chat history with alignment
     if st.session_state['chat_history']:
+        print("damn")
         for chat in st.session_state['chat_history']:
-            if chat["type"] == "user":
+            if chat["type"] == "User":
                 st.markdown(f'<div class="user-message">{chat["message"]}</div>', unsafe_allow_html=True)
             else:
                 st.markdown(f'<div class="ai-message">{chat["message"]}</div>', unsafe_allow_html=True)
-    st.markdown("""
-    <style>
-    .user-message {
-        background-color: #d1e7dd;
-        border-radius: 10px;
-        padding: 8px;
-        text-align: left;
-        max-width: 60%;
-        float: right;
-        margin-bottom: 10px;
-        clear: both;
-    }
-    .ai-message {
-        background-color: #f8d7da;
-        border-radius: 10px;
-        padding: 8px;
-        text-align: left;
-        max-width: 60%;
-        float: left;
-        margin-bottom: 10px;
-        clear: both;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-
-

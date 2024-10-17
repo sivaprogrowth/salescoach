@@ -6,6 +6,7 @@ from openai import OpenAI
 from util import *
 import torch
 import whisper
+from datetime import datetime
 import pyaudio
 import os , json
 import mysql.connector
@@ -13,8 +14,6 @@ from dotenv import load_dotenv
 import sounddevice as sd
 import numpy as np
 import queue
-from datetime import datetime
-
 load_dotenv()
 
 
@@ -29,7 +28,7 @@ cursor = connection.cursor()
 
 app = FastAPI()
 questions = []
-chats = []
+answers = []
 qn = 0 
 client  = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 p = pyaudio.PyAudio()
@@ -54,8 +53,8 @@ def getQnA(text):
         {
             "role": "system",
             "content": """
-            You are a trainer with strong expertise at training sales people. You excel at understanding course materials and generating high-quality, assessment questions to test the knowledge of salespersons. You can also provide respective answers.
-            Your task is to evaluate the provided course materials and generate top 5 relevant questions that assess a person's understanding of key points, insights, or concepts from the material. The questions can be medium tough and easy to understand by the salesperson.
+            You are an AI that excels at analyzing complex text and generating high-quality, knowledge-assessment questions and their respective answers. 
+            Your task is to evaluate the provided text and generate 5 relevant questions that assess a person's understanding of key points, insights, or concepts from the material. 
             Each question should test knowledge of significant information, and you should also provide the best possible answer for each question.
 
             Please format the response as a strict list of dictionaries in the following JSON format:
@@ -96,11 +95,6 @@ def getQnA(text):
     return qna
 
 def saveQnA(text , index):
-    # lines = text.splitlines()
-    # if len(lines) > 2:
-    #     text = '\n'.join(lines[1:0])
-    # else:
-    #     text = ''
     text = text.replace('```json', '').replace('```', '')
     print(text)
     qnas = json.loads(text)
@@ -118,28 +112,18 @@ def saveQnA(text , index):
                             INSERT INTO qna (id, question, answer, idx) 
                             VALUES (%s, %s, %s, %s)
                         """
-        # Execute the insert query
         cursor.execute(insert_query, data)
-
-        # Commit the transaction
         connection.commit()
 
-def getQuestions():
-    ques= [
-    "What was the primary technology stack used by Shariq during his AI Engineer internship at OpenInApp, and how did he optimize Instagram Reels processing?",
-    "How did Shariq contribute to reducing the production time of the TTS system during his internship, and which frameworks and technologies were involved?",
-    "Can you explain the key components and technologies used in Shariq's 'Intelligent SOP Generator' project, and how it improved the efficiency of SOP creation?",
-    "What role did GANs and Transformers play in Shariq's research on Adversarial Bot Detection at the University of New South Wales, and how did he improve convergence by 20%?",
-    "What methods and tools did Shariq employ to enhance the accuracy and reduce false positives in the Advanced Duplicate Question Detection System?"
-    ]
-    answers = [
-        "Shariq used a technology stack that included Python, TensorFlow, and AWS during his AI Engineer internship at OpenInApp. He optimized Instagram Reels processing by implementing efficient algorithms that reduced video processing time by 30%.",
-        "During his internship, Shariq contributed by streamlining the production pipeline of the TTS system, incorporating deep learning frameworks like Keras and leveraging GPU resources to achieve a 40% reduction in production time.",
-        "The 'Intelligent SOP Generator' project utilized NLP techniques, Python, and machine learning algorithms. It improved SOP creation efficiency by automating data extraction and text generation, reducing manual efforts by 50%.",
-        "In his research on Adversarial Bot Detection, Shariq employed GANs for generating synthetic training data and Transformers for improving model accuracy. He achieved a 20% increase in convergence speed by fine-tuning hyperparameters.",
-        "Shariq utilized a combination of statistical analysis and machine learning models, including SVM and Random Forest, to enhance accuracy in the Advanced Duplicate Question Detection System, successfully reducing false positives by 15%."
-    ]
-    return ques
+def getQuestionsAnswers():
+    cursor.execute("select question , answer from qna")
+    result = cursor.fetchall()
+    ques = []
+    ans = []
+    for qna in result:
+        ques.append(qna[0])
+        ans.append(qna[1])
+    return ques , ans
 
 stream_p = p.open(format=pyaudio.paInt16,  # Format: 16-bit PCM (Pulse Code Modulation)
                 channels=1,              # Channels: 1 (Mono)
@@ -168,32 +152,26 @@ def transcribe():
     return transcription.text
 
 def addToChat(type , message):
-    global chats
-    entry = {
-        'message':message,
-        'type' :type
-    }
-    chats.append(entry)
-    print()
+    data = (
+            0,
+            type,   # question
+            message,  # answer
+            'shariq', # index
+            1
+        )
+    insert_query = """
+                    INSERT INTO chats (id, message_type, message_content, `index`, user_id) 
+                    VALUES (%s, %s, %s, %s, %s)
+                """
+    cursor.execute(insert_query, data)
+    connection.commit()
 
 def genReply(text,qnum,index):
     global questions
+    global answers
+    answer = answers[qnum]
 
-    context = find_match(text,index)
-    question = questions[qnum]
-    message = f"Context:\n {context} \n\n query:\n{question}"
-    sysOutput = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "you are an AI assisstant. your task is to understand the user query and also the context shared along with the query .Once done that you need to answer the query in relevence to the  . please keep the answer in a paragraph format such that a text to speech model can later on read it out.try to keep the response in not more than 50 words please."},
-            {
-                "role": "user",
-                "content": message
-            }
-        ]
-    )
-
-    message = f"User Message:\n {text} \n\n AI Message:\n{sysOutput.choices[0].message.content} "
+    message = f"User Message:\n {text} \n\n AI Message:{answer}"
     result = client.chat.completions.create(
         model="gpt-4o",
         messages=[
@@ -241,24 +219,36 @@ def stop_recording():
         return text
     else:
         return "No recording in progress."
+    
+def fetchChat():
+    cursor.execute("select message_type, message_content from chats")
+    result = cursor.fetchall()
+    print(result)
+    chats = []
+    if len(result)>0:
+        for chat in result[0]:
+            entry = {'type':chat[0],'message':chat[1]}
+            chats.append(entry)
+    return chats
 
 @app.post("/fetch_questions/{index}")
 async def receive_data(index: str):
     global questions
-    questions = getQuestions()
+    global answers
+    questions , answers = getQuestionsAnswers()
     return {'status_code': status.HTTP_200_OK}
 
 @app.get("/fetch_chats")
 async def receive_data(req: Request):
     global questions
-    global chats
     global qn
     contents = await req.json()
-    # chat = fetchChat()
-    if chats == []:
+    chats = fetchChat()
+    if len(chats) == 0:
         message = f'Hello i am Siva your AI proctor, Are you ready!! first question for you is, {questions[0]}'
         speak(message)
-        chats = [{"message": message, "type":"AI"}]
+        addToChat(type = 'AI',message = message)
+        chats = fetchChat()
     return {'status_code': status.HTTP_200_OK, 'chat':chats}
 
 
@@ -273,6 +263,7 @@ async def upload_file(req: Request):
     reply = genReply(text,qn,index)
     speak(reply)
     addToChat(type = 'AI',message = reply)
+    chats = fetchChat()
     return {'status_code':status.HTTP_200_OK,'chat':chats}
 
 
@@ -292,7 +283,6 @@ async def stop_recording_endpoint(req : Request):
     print(index)
     print(text)
     qna = getQnA(text)
-    print(qna)
     saveQnA(qna,index)
     return{'status_code':status.HTTP_200_OK}
 
