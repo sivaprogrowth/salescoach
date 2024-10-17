@@ -1,0 +1,24 @@
+setuptools
+pyaudio
+SpeechRecognition
+--extra-index-url https://download.pytorch.org/whl/cu116
+torch
+numpy
+git+https://github.com/openai/whisper.git
+streamlit
+streamlit_chat
+langchain
+sentence_transformers
+openai
+PyPDF2
+tiktoken
+pinecone-client
+google-cloud-translate
+pdfminer
+opencv-python
+IPython
+streamlit_webrtc
+streamlit-mic-recorder
+langchain-community
+langchain-openai
+
