@@ -21,4 +21,6 @@ streamlit_webrtc
 streamlit-mic-recorder
 langchain-community
 langchain-openai
-
+sounddevice
+fastapi
+mysql-connector-python
