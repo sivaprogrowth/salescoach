@@ -1,53 +1,39 @@
 import streamlit as st
+import wave
+
 import requests
-from util import *
-from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
-from pdfminer.converter import TextConverter
-from pdfminer.layout import LAParams
-from pdfminer.pdfpage import PDFPage
-from io import StringIO
 
-@st.cache_data
-def convert_pdf_to_txt_file(path):
-    rsrcmgr = PDFResourceManager()
-    retstr = StringIO()
-    laparams = LAParams()
-    device = TextConverter(rsrcmgr, retstr, laparams=laparams)
-    # fp = open(path, 'rb')
-    interpreter = PDFPageInterpreter(rsrcmgr, device)
-    
-    file_pages = PDFPage.get_pages(path)
-    nbPages = len(list(file_pages))
-    for page in PDFPage.get_pages(path):
-      interpreter.process_page(page)
-      t = retstr.getvalue()
-    # text = retstr.getvalue()
+# Fetch audio data from backend
+def fetch_audio(text):
+    response = requests.post(f"http://0.0.0.0:8000/generateAUD", json={"text": text})
+    if response.status_code == 200:
+        return response.content
+    else:
+        st.write("Failed to fetch audio")
+        return None
 
-    # fp.close()
-    device.close()
-    retstr.close()
-    return t 
-# Step 1: Drop-down Selector
-NEW_INDEX = "(New index)"
-# Layout for the form 
-options = get_index_list().names() + [NEW_INDEX]
-option = st.selectbox("Select an option", options)
+# Function to play audio in browser
+def play_audio(audio_data):
+    if audio_data:
+        save_wav_file("output.wav", audio_data)
+        # Display audio player in Streamlit
+        audio_bytes = open('output.wav', 'rb').read()
+        st.audio(audio_bytes, format='audio/wav')
 
-# Just to show the selected option
-if option == NEW_INDEX:
-    otherOption = st.text_input("Enter your other option...")
-    if otherOption:
-        selection = otherOption
-        index_init(otherOption, 1536)
-        st.info(f":white_check_mark: New index {otherOption} created! ")
-    # Step 2: File Upload Block
-    uploaded_file = st.file_uploader("Upload a file", type=["txt", "pdf", "docx"])
-    if uploaded_file is not None:
-        st.write("File uploaded successfully!")
-        if st.button("Send File"):
-            name = uploaded_file.name
-            raw_text = convert_pdf_to_txt_file(uploaded_file)
-            response = requests.post("http://localhost:8000/createQuestionAnswer",json={"index": option, "text":raw_text})
-            st.write(f"File upload status: {response.status_code}")
-    option = otherOption
-st.write(f"Selected option: {option}")
+def save_wav_file(filename, audio_data, sample_rate=22050, num_channels=1):
+    with wave.open(filename, 'wb') as wf:
+        wf.setnchannels(num_channels)
+        wf.setsampwidth(2)  # assuming 16-bit audio
+        wf.setframerate(sample_rate)
+        wf.writeframes(audio_data)
+
+# UI to get input text and play audio
+st.title("Text-to-Speech Audio Player")
+
+user_input = st.text_input("Enter text to convert to speech", "")
+if st.button("Generate and Play Audio"):
+    if user_input:
+        audio_data = fetch_audio(user_input)
+        play_audio(audio_data)
+    else:
+        st.write("Please enter some text.")

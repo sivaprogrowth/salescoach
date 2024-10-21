@@ -1,7 +1,7 @@
 import streamlit as st
 import requests
 from util import *
-import queue
+import queue , wave
 import sounddevice as sd
 import numpy as np
 from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
@@ -19,6 +19,29 @@ def audio_callback(indata, frames, time, status):
     if status:
         print(status)
     audio_queue.put(indata.copy())
+
+def fetch_audio(text):
+    response = requests.post(f"http://0.0.0.0:8000/generateAUD", json={"text": text})
+    if response.status_code == 200:
+        return response.content
+    else:
+        st.write("Failed to fetch audio")
+        return None
+    
+# Function to play audio in browser
+def play_audio(audio_data):
+    if audio_data:
+        save_wav_file("output.wav", audio_data)
+        # Display audio player in Streamlit
+        audio_bytes = open('output.wav', 'rb').read()
+        st.audio(audio_bytes, format='audio/wav')
+
+def save_wav_file(filename, audio_data, sample_rate=22050, num_channels=1):
+    with wave.open(filename, 'wb') as wf:
+        wf.setnchannels(num_channels)
+        wf.setsampwidth(2)  # assuming 16-bit audio
+        wf.setframerate(sample_rate)
+        wf.writeframes(audio_data)
 
 def start_recording():
     print("Recording started...")
@@ -95,6 +118,9 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+st.title("Welcome to AI Powered Sales Coach")
+
+
 if 'start' not in st.session_state:
     st.session_state['start'] = False
 if 'stream' not in st.session_state:
@@ -118,7 +144,7 @@ if option == NEW_INDEX:
         if st.button("Send File"):
             name = uploaded_file.name
             raw_text = convert_pdf_to_txt_file(uploaded_file)
-            response = requests.post("http://localhost:8000/createQuestionAnswer",json={"index": option, "text": raw_text})
+            response = requests.post("http://localhost:8000/createQuestionAnswer",json={"index": otherOption, "text": raw_text})
             st.write(f"File upload status: {response.status_code}")
     option = otherOption
 st.write(f"Selected option: {option}")
@@ -133,6 +159,10 @@ if st.session_state['start']:
     
     response = requests.get(f"http://0.0.0.0:8000/fetch_chats/",json={'index':option,'user_id':'shariq'}).json()
     st.session_state['chat_history'] = response['chat']
+
+    if len(st.session_state['chat_history']) == 1:
+        audio_data = fetch_audio(st.session_state['chat_history'][0]['message'])
+        play_audio(audio_data)
 
     if st.button("Start Recording"):
         response = requests.post("http://0.0.0.0:8000//start-recording")
@@ -151,9 +181,11 @@ if st.session_state['start']:
 
     # Display chat history with alignment
     if st.session_state['chat_history']:
-        print("damn")
+        lst = len(st.session_state['chat_history'])-1
+        audio_data = fetch_audio(st.session_state['chat_history'][lst]['message'])
+        play_audio(audio_data)
         for chat in st.session_state['chat_history']:
-            if chat["type"] == "User":
+            if chat["type"] == "user":
                 st.markdown(f'<div class="user-message">{chat["message"]}</div>', unsafe_allow_html=True)
             else:
                 st.markdown(f'<div class="ai-message">{chat["message"]}</div>', unsafe_allow_html=True)

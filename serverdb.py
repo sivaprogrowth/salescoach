@@ -1,11 +1,10 @@
-from fastapi import FastAPI, UploadFile, File, Form , status, Request
+from fastapi import FastAPI, UploadFile, File, Form , status, Request , Response
 from fastapi.responses import FileResponse , JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import scipy.io.wavfile as wavfile  # To save audio in .wav format
 from openai import OpenAI
 from util import *
 import torch
-import whisper
 from datetime import datetime
 import pyaudio
 import os , json
@@ -129,17 +128,29 @@ stream_p = p.open(format=pyaudio.paInt16,  # Format: 16-bit PCM (Pulse Code Modu
                 channels=1,              # Channels: 1 (Mono)
                 rate=24000,              # Sample rate: 24,000 Hz (samples per second)
                 output=True)  
-def speak(text):
-    with client.audio.speech.with_streaming_response.create(
-        model="tts-1",                   # Specify the TTS model to use
-        voice="alloy",                   # Specify the voice to use for TTS
-        input=text,  # Input text to be converted to speech
-        response_format="pcm"            # Response format: PCM (Pulse Code Modulation)
-    ) as response:
-        # Iterate over the audio chunks in the response
-        for chunk in response.iter_bytes(1024):  # Read 1024 bytes at a time
-            stream_p.write(chunk)
+# def speak(text):
+#     with client.audio.speech.with_streaming_response.create(
+#         model="tts-1",                   # Specify the TTS model to use
+#         voice="alloy",                   # Specify the voice to use for TTS
+#         input=text,  # Input text to be converted to speech
+#         response_format="pcm"            # Response format: PCM (Pulse Code Modulation)
+#     ) as response:
+#         # Iterate over the audio chunks in the response
+#         for chunk in response.iter_bytes(1024):  # Read 1024 bytes at a time
+#             stream_p.write(chunk)
 
+def speak(text):
+    audio_data = b''  # to store audio chunks
+    with client.audio.speech.with_streaming_response.create(
+        model="tts-1",
+        voice="alloy",
+        input=text,
+        response_format="pcm"
+    ) as response:
+        for chunk in response.iter_bytes(1024):  # Read 1024 bytes at a time
+            audio_data += chunk  # append each chunk to the audio_data
+
+    return audio_data
 
 def transcribe():
     print('i am in transcribe function..')
@@ -175,7 +186,12 @@ def genReply(text,qnum,index):
     result = client.chat.completions.create(
         model="gpt-4o",
         messages=[
-            {"role": "system", "content": "you are an AI assisstant. you are provided two answer to the same question, one is the user answer and the other is the AU generated answer your task is to analyse both the answers and compare them and comment on the user answer that how they can improve there answers to get closer the the one answer generated using AI "},
+            {"role": "system", "content": """You are an expert sales coach. You have experience in evaluating sales pitches and responses of salespersons and give them quality and unbiased focused feedback. You can also rate the responses from the salespersons with the ideal responses.
+ For evaluation,you are provided two responses to the same question, one is the response from the salesperson and the other is the AI generated answer. Your task is to analyse both the answers and compare them and provide the following details
+Rate the response from the salesperson against the ideal response for the question. Give your rating on a scale of 5 where 5 is the best and 1 is the worst.
+Give 3 bulleted comments to the salesperson on how they can improve there answers to get closer the the one answer generated using AI
+Give 4 action items that the salesperson has to follow for the next 1 month to improve their sales pitch
+It is compulsory for you to rate the salesperson response. """},
             {
                 "role": "user",
                 "content": message
@@ -223,13 +239,24 @@ def stop_recording():
 def fetchChat():
     cursor.execute("select message_type, message_content from chats")
     result = cursor.fetchall()
-    print(result)
     chats = []
     if len(result)>0:
-        for chat in result[0]:
+        for chat in result:
             entry = {'type':chat[0],'message':chat[1]}
             chats.append(entry)
     return chats
+
+@app.post("/generateAUD")
+async def stop_recording_endpoint(req : Request):
+    content = await req.json()
+    text = content['text']
+    audio_data = speak(text)
+    headers = {
+        'Content-Disposition': 'inline; filename="response.wav"',
+        'Content-Type': 'audio/wav'
+    }
+
+    return Response(content=audio_data, media_type="audio/wav", headers=headers)
 
 @app.post("/fetch_questions/{index}")
 async def receive_data(index: str):
@@ -246,7 +273,7 @@ async def receive_data(req: Request):
     chats = fetchChat()
     if len(chats) == 0:
         message = f'Hello i am Siva your AI proctor, Are you ready!! first question for you is, {questions[0]}'
-        speak(message)
+        # speak(message)
         addToChat(type = 'AI',message = message)
         chats = fetchChat()
     return {'status_code': status.HTTP_200_OK, 'chat':chats}
@@ -261,7 +288,7 @@ async def upload_file(req: Request):
     index = contents['index']
     addToChat(type = 'User',message = text)
     reply = genReply(text,qn,index)
-    speak(reply)
+    # speak(reply)
     addToChat(type = 'AI',message = reply)
     chats = fetchChat()
     return {'status_code':status.HTTP_200_OK,'chat':chats}

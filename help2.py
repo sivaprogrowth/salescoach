@@ -1,108 +1,46 @@
-from fastapi import FastAPI, BackgroundTasks, Request
+from fastapi import FastAPI, Request ,Response
 from openai import OpenAI
 import openai
 from dotenv import load_dotenv
 import os, json
 load_dotenv()
-import mysql.connector
+import pyaudio
 
-connection = mysql.connector.connect(
-    user = 'root',
-    host = 'localhost',
-    database = 'shariq',
-    passwd = 'Shariq@123'
-)
 
-cursor = connection.cursor()
 
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-
+p = pyaudio.PyAudio()
 app = FastAPI()
 
-def getQnA(text):
+stream_p = p.open(format=pyaudio.paInt16,  # Format: 16-bit PCM (Pulse Code Modulation)
+                channels=1,              # Channels: 1 (Mono)
+                rate=24000,              # Sample rate: 24,000 Hz (samples per second)
+                output=True)  
+def speak(text):
+    audio_data = b''  # to store audio chunks
+    with client.audio.speech.with_streaming_response.create(
+        model="tts-1",
+        voice="alloy",
+        input=text,
+        response_format="pcm"
+    ) as response:
+        for chunk in response.iter_bytes(1024):  # Read 1024 bytes at a time
+            audio_data += chunk  # append each chunk to the audio_data
 
-    messages = [
-        {
-            "role": "system",
-            "content": """
-            You are an AI that excels at analyzing complex text and generating high-quality, knowledge-assessment questions and their respective answers. 
-            Your task is to evaluate the provided text and generate 5 relevant questions that assess a person's understanding of key points, insights, or concepts from the material. 
-            Each question should test knowledge of significant information, and you should also provide the best possible answer for each question.
-
-            Please format the response as a strict list of dictionaries in the following JSON format:
-
-            [
-                {
-                    "Question": ".....",
-                    "Answer": "......"
-                },
-                {
-                    "Question": ".....",
-                    "Answer": "......"
-                },
-                {
-                    "Question": ".....",
-                    "Answer": "......"
-                }
-            ]
-
-            Ensure that the output strictly adheres to this format so it can be converted into JSON and stored in a database.
-            """
-        },
-        {
-            "role": "user",
-            "content": f"Here is the text: {text}"
-        }
-    ]
-
-    qna = client.chat.completions.create(
-        model="gpt-4o", 
-        messages=messages,
-        max_tokens=1000,
-        temperature=0.7, 
-        n=1,
-        stop=None
-    )
-    qna = qna.choices[0].message.content
-    return qna
-
-def saveQnA(text , index):
-    lines = text.splitlines()
-    if len(lines) > 2:
-        text = '\n'.join(lines[2:-1])
-    else:
-        text = ''
-    qnas = json.loads(text)
-    for idx , qna in enumerate(qnas):
-        data = (
-            idx,
-            qna['Question'],   # question
-            qna['Answer'],  # answer
-            index # index
-        )
-        insert_query = """
-                            INSERT INTO question_answer (id, question, answer, `index`) 
-                            VALUES (%s, %s, %s, %s)
-                        """
-        # Execute the insert query
-        cursor.execute(insert_query, data)
-
-        # Commit the transaction
-        connection.commit()
+    return audio_data
 
 
-
-@app.post("/createQuestionAnswer")
+@app.post("/generateAUD")
 async def stop_recording_endpoint(req : Request):
-    print(req)
     content = await req.json()
-    print(content)
-    index = content['index']
     text = content['text']
-    print(index)
-    print(text)
-    qna = getQnA(text)
-    saveQnA(qna,index)
+    audio_data = speak(text)
+    headers = {
+        'Content-Disposition': 'inline; filename="response.wav"',
+        'Content-Type': 'audio/wav'
+    }
+
+    return Response(content=audio_data, media_type="audio/wav", headers=headers)
 
 if __name__ == "__main__":
     import uvicorn
