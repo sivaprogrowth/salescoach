@@ -20,6 +20,7 @@ streamlit_webrtc
 streamlit-mic-recorder
 langchain-community
 langchain-openai
+audio-recorder-streamlit
 sounddevice
 fastapi
 uvicorn

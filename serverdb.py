@@ -114,8 +114,8 @@ def saveQnA(text , index):
         cursor.execute(insert_query, data)
         connection.commit()
 
-def getQuestionsAnswers():
-    cursor.execute("select question , answer from qna")
+def getQuestionsAnswers(index):
+    cursor.execute(f"select question , answer from qna where idx = '{index}'")
     result = cursor.fetchall()
     ques = []
     ans = []
@@ -154,7 +154,7 @@ def speak(text):
 
 def transcribe():
     print('i am in transcribe function..')
-    audio_file= open("reply.wav", "rb")
+    audio_file= open("reply2.wav", "rb")
     transcription = client.audio.transcriptions.create(
     model="whisper-1", 
     file=audio_file
@@ -162,12 +162,12 @@ def transcribe():
     print(transcription.text)
     return transcription.text
 
-def addToChat(type , message):
+def addToChat(type , message , index):
     data = (
             0,
             type,   # question
             message,  # answer
-            'shariq', # index
+            index, # index
             1
         )
     insert_query = """
@@ -236,8 +236,8 @@ def stop_recording():
     else:
         return "No recording in progress."
     
-def fetchChat():
-    cursor.execute("select message_type, message_content from chats")
+def fetchChat(index):
+    cursor.execute(f"select message_type, message_content from chats where `index` = '{index}'")
     result = cursor.fetchall()
     chats = []
     if len(result)>0:
@@ -262,35 +262,41 @@ async def stop_recording_endpoint(req : Request):
 async def receive_data(index: str):
     global questions
     global answers
-    questions , answers = getQuestionsAnswers()
-    return {'status_code': status.HTTP_200_OK}
+    print(index)
+    questions , answers = getQuestionsAnswers(index)
+    if(len(questions)==0):
+        message  = "Please Upload a file to fetch Questions."
+    else:
+        message  = "Ok"
+        print(questions)
+    return {'status_code': status.HTTP_200_OK, 'message':message}
 
 @app.get("/fetch_chats")
 async def receive_data(req: Request):
     global questions
     global qn
     contents = await req.json()
-    chats = fetchChat()
+    chats = fetchChat(contents['index'])
     if len(chats) == 0:
         message = f'Hello i am Siva your AI proctor, Are you ready!! first question for you is, {questions[0]}'
         # speak(message)
-        addToChat(type = 'AI',message = message)
-        chats = fetchChat()
+        addToChat(type = 'AI',message = message,index = contents['index'])
+        chats = fetchChat(contents['index'])
     return {'status_code': status.HTTP_200_OK, 'chat':chats}
 
 
 @app.post("/stopRecording")
 async def upload_file(req: Request):
     global qn
-    text = stop_recording()
+    text = transcribe()
     contents = await req.json()
     qn = qn+1
     index = contents['index']
-    addToChat(type = 'User',message = text)
+    addToChat(type = 'User',message = text , index=index)
     reply = genReply(text,qn,index)
     # speak(reply)
-    addToChat(type = 'AI',message = reply)
-    chats = fetchChat()
+    addToChat(type = 'AI',message = reply,index = index)
+    chats = fetchChat(index)
     return {'status_code':status.HTTP_200_OK,'chat':chats}
 
 
