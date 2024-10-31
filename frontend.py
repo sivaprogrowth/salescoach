@@ -16,7 +16,7 @@ user_id = 'shariq'
 sample_rate = 44100
 
 def fetch_audio(text):
-    response = requests.post(f"http://0.0.0.0:8000/generateAUD", json={"text": text})
+    response = requests.post(f"https://salescoach.yogyabano.com/backend/generateAUD", json={"text": text})
     if response.status_code == 200:
         return response.content
     else:
@@ -87,7 +87,7 @@ st.markdown("""
         max-width: 60%;
         float: right;
         margin-bottom: 10px;
-        clear: both;
+        clear: both;`
         color: #FFFFFF;
     }
     .ai-message {
@@ -104,10 +104,10 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("Welcome to AI Powered Sales Coach")
+#st.title("Welcome to AI Powered Sales Coach")
 
 
-st.title("Welcome to AI Powered Sales Coach")
+#st.title("Welcome to AI Powered Sales Coach")
 
 if 'start' not in st.session_state:
     st.session_state['start'] = False
@@ -132,7 +132,7 @@ if option == NEW_INDEX:
         if st.button("Generate Responses"):
             name = uploaded_file.name
             raw_text = convert_pdf_to_txt_file(uploaded_file)
-            response = requests.post("http://localhost:8000/createQuestionAnswer", json={"index": otherOption, "text": raw_text})
+            response = requests.post("https://salescoach.yogyabano.com/backend/createQuestionAnswer", json={"index": otherOption, "text": raw_text})
             st.write(f"File upload status: {response.status_code}")
     option = otherOption
 
@@ -144,10 +144,10 @@ if st.button('Start Test'):
 
 if st.session_state['start']:
     if option:
-        response = requests.post(f"http://0.0.0.0:8000/fetch_questions/{option}")
+        response = requests.post(f"https://salescoach.yogyabano.com/backend/fetch_questions/{option}")
         if response.json()['message'] == "Ok":
 
-            response = requests.get(f"http://0.0.0.0:8000/fetch_chats/", json={'index': option, 'user_id': 'shariq'}).json()
+            response = requests.post(f"https://salescoach.yogyabano.com/backend/fetch_chats", json={'index': option, 'user_id': 'shariq'}).json()
             st.session_state['chat_history'] = response['chat']
             st.write("### Audio Recorder")
             recorder_audio = audio_recorder(text="Click to Record / Stop")
@@ -157,7 +157,7 @@ if st.session_state['start']:
                 save_wav_file2(audio_path, recorder_audio)
                 st.write("Audio recording saved!")
 
-                response = requests.post(f"http://0.0.0.0:8000/stopRecording",json={'index': option})
+                response = requests.post(f"https://salescoach.yogyabano.com/backend/stopRecording",json={'index': option})
 
                 if response.status_code == 200:
                     result = response.json()

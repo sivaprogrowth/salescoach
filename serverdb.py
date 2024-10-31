@@ -19,7 +19,7 @@ load_dotenv()
 connection = mysql.connector.connect(
     user = 'root',
     host = 'localhost',
-    database = 'shariq',
+    database = 'salescoach',
     passwd = 'Shariq@123'
 )
 
@@ -124,10 +124,10 @@ def getQuestionsAnswers(index):
         ans.append(qna[1])
     return ques , ans
 
-stream_p = p.open(format=pyaudio.paInt16,  # Format: 16-bit PCM (Pulse Code Modulation)
-                channels=1,              # Channels: 1 (Mono)
-                rate=24000,              # Sample rate: 24,000 Hz (samples per second)
-                output=True)  
+#stream_p = p.open(format=pyaudio.paInt16,  # Format: 16-bit PCM (Pulse Code Modulation)
+#                channels=1,              # Channels: 1 (Mono)
+#                rate=24000,              # Sample rate: 24,000 Hz (samples per second)
+#                output=True)  
 # def speak(text):
 #     with client.audio.speech.with_streaming_response.create(
 #         model="tts-1",                   # Specify the TTS model to use
@@ -246,7 +246,7 @@ def fetchChat(index):
             chats.append(entry)
     return chats
 
-@app.post("/generateAUD")
+@app.post("/backend/generateAUD")
 async def stop_recording_endpoint(req : Request):
     content = await req.json()
     text = content['text']
@@ -258,7 +258,7 @@ async def stop_recording_endpoint(req : Request):
 
     return Response(content=audio_data, media_type="audio/wav", headers=headers)
 
-@app.post("/fetch_questions/{index}")
+@app.post("/backend/fetch_questions/{index}")
 async def receive_data(index: str):
     global questions
     global answers
@@ -271,12 +271,15 @@ async def receive_data(index: str):
         print(questions)
     return {'status_code': status.HTTP_200_OK, 'message':message}
 
-@app.get("/fetch_chats")
+@app.post("/backend/fetch_chats")
 async def receive_data(req: Request):
     global questions
     global qn
+    print("json = ",req.json)
     contents = await req.json()
+    print("index is ",contents['index'])
     chats = fetchChat(contents['index'])
+    print("first chat fetch done")
     if len(chats) == 0:
         message = f'Hello i am Siva your AI proctor, Are you ready!! first question for you is, {questions[0]}'
         # speak(message)
@@ -285,7 +288,7 @@ async def receive_data(req: Request):
     return {'status_code': status.HTTP_200_OK, 'chat':chats}
 
 
-@app.post("/stopRecording")
+@app.post("/backend/stopRecording")
 async def upload_file(req: Request):
     global qn
     text = transcribe()
@@ -301,12 +304,12 @@ async def upload_file(req: Request):
 
 
 
-@app.post("/start-recording")
+@app.post("/backend/start-recording")
 def start_recording_endpoint():
     start_recording()
     return {"message": "Recording started"}
 
-@app.post("/createQuestionAnswer")
+@app.post("/backend/createQuestionAnswer")
 async def stop_recording_endpoint(req : Request):
     print(req)
     content = await req.json()
