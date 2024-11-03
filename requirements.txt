@@ -1,8 +1,6 @@
 setuptools
 pyaudio
 SpeechRecognition
---extra-index-url https://download.pytorch.org/whl/cu116
-torch
 numpy
 streamlit
 streamlit_chat
@@ -25,3 +23,4 @@ sounddevice
 fastapi
 uvicorn
 mysql-connector
+boto3

@@ -1,11 +1,12 @@
-from fastapi import FastAPI, UploadFile, File, Form , status, Request , Response
+from fastapi import FastAPI, UploadFile, File, Form , status, Request , Response, HTTPException
 from fastapi.responses import FileResponse , JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-import scipy.io.wavfile as wavfile  # To save audio in .wav format
 from openai import OpenAI
 from util import *
-import torch
 from datetime import datetime
+from pinecone import Pinecone
+from botocore.exceptions import BotoCoreError, ClientError
+import scipy.io.wavfile as wavfile 
 import pyaudio
 import os , json
 import mysql.connector
@@ -13,15 +14,28 @@ from dotenv import load_dotenv
 import sounddevice as sd
 import numpy as np
 import queue
+import requests
+import boto3
 load_dotenv()
 
-
+DATABASE = os.getenv('DATABASE')
+PASSWD = os.getenv('PASSWD')
 connection = mysql.connector.connect(
     user = 'root',
     host = 'localhost',
-    database = 'salescoach',
-    passwd = 'Shariq@123'
+    database = DATABASE,
+    passwd = PASSWD
 )
+
+sns_client = boto3.client('sns', region_name='ap-south-1')
+SNS_TOPIC_ARN = os.getenv('SNS_TOPIC_ARN') 
+# Glific API credentials
+GLIFIC_PHONE_NUMBER = "918420925890"  # Update with the required phone number
+GLIFIC_PASSWORD = "ALLAHuAKBAR@123"   # Update with the required password
+GLIFIC_AUTH_URL = "https://api.yogyabano.glific.com/api/v1/session"
+GLIFIC_SEND_URL = "https://api.yogyabano.glific.com/api"
+pinecone_api_key = os.getenv("PINECONE_API_KEY")
+pinecone_database_name = os.getenv("PINECONE_DATABASE_NAME")
 
 cursor = connection.cursor()
 
@@ -31,7 +45,6 @@ answers = []
 qn = 0 
 client  = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 p = pyaudio.PyAudio()
-# Parameters for recording
 sample_rate = 44100
 channels = 1
 audio_queue = queue.Queue()
@@ -40,7 +53,7 @@ stream = None
 # CORS middleware to allow requests from frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins (adjust as needed)
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -124,31 +137,16 @@ def getQuestionsAnswers(index):
         ans.append(qna[1])
     return ques , ans
 
-#stream_p = p.open(format=pyaudio.paInt16,  # Format: 16-bit PCM (Pulse Code Modulation)
-#                channels=1,              # Channels: 1 (Mono)
-#                rate=24000,              # Sample rate: 24,000 Hz (samples per second)
-#                output=True)  
-# def speak(text):
-#     with client.audio.speech.with_streaming_response.create(
-#         model="tts-1",                   # Specify the TTS model to use
-#         voice="alloy",                   # Specify the voice to use for TTS
-#         input=text,  # Input text to be converted to speech
-#         response_format="pcm"            # Response format: PCM (Pulse Code Modulation)
-#     ) as response:
-#         # Iterate over the audio chunks in the response
-#         for chunk in response.iter_bytes(1024):  # Read 1024 bytes at a time
-#             stream_p.write(chunk)
-
 def speak(text):
-    audio_data = b''  # to store audio chunks
+    audio_data = b''
     with client.audio.speech.with_streaming_response.create(
         model="tts-1",
         voice="alloy",
         input=text,
         response_format="pcm"
     ) as response:
-        for chunk in response.iter_bytes(1024):  # Read 1024 bytes at a time
-            audio_data += chunk  # append each chunk to the audio_data
+        for chunk in response.iter_bytes(1024):
+            audio_data += chunk 
 
     return audio_data
 
@@ -165,9 +163,9 @@ def transcribe():
 def addToChat(type , message , index):
     data = (
             0,
-            type,   # question
-            message,  # answer
-            index, # index
+            type,   
+            message, 
+            index, 
             1
         )
     insert_query = """
@@ -231,7 +229,6 @@ def stop_recording():
         audio_data = np.int16(audio_data * 32767)  # Convert float32 [-1, 1] to int16
         wavfile.write('reply.wav', 44100, audio_data)
         text = transcribe()
-        # speak(text)
         return text
     else:
         return "No recording in progress."
@@ -245,6 +242,86 @@ def fetchChat(index):
             entry = {'type':chat[0],'message':chat[1]}
             chats.append(entry)
     return chats
+
+async def run_script(message: str) -> str:
+    try:
+        print('Message received from user:', message)
+        
+        # Process the message and generate an embedding
+        response = client.embeddings.create(
+            input=[message],
+            model="text-embedding-ada-002",
+        )
+        embedding = response.data[0].embedding
+        print('Embeddings created')
+        pc = Pinecone(api_key=pinecone_api_key)
+        index = pc.Index(pinecone_database_name)
+        # Send embedding to Pinecone and perform a query
+        pinecone_response = index.query(vector=embedding, top_k=1,include_metadata=True,)
+        pinecone_result = "\n".join([match['metadata']['text'] for match in pinecone_response['matches']])
+        print('Pinecone query completed')
+        
+        # Prepare prompt for OpenAI completion
+        prompt = f"Based on the following data:\n{pinecone_result}\nGenerate a response to the query message {message}."
+        
+        # Get response from OpenAI's completion model
+        completion = client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=150
+        )
+        print("OpenAI response received")
+        return completion.choices[0].message.content
+        
+    except Exception as e:
+        print(f"Error in run_script: {e}")
+        raise HTTPException(status_code=500, detail="An error occurred while processing the request")
+
+# Function to get the auth token from the Glific authentication API
+def get_auth_token():
+    try:
+        response = requests.post(
+            GLIFIC_AUTH_URL,
+            json={
+                "user": {
+                    "phone": GLIFIC_PHONE_NUMBER,
+                    "password": GLIFIC_PASSWORD,
+                }
+            }
+        )
+        response.raise_for_status()
+        auth_token = response.json().get("data", {}).get("access_token")
+        if not auth_token:
+            raise HTTPException(status_code=500, detail="Auth token not received")
+        print("Auth token received:", auth_token)
+        return auth_token
+    except requests.HTTPError as error:
+        print("Error fetching auth token:", error)
+        raise HTTPException(status_code=500, detail="Unable to fetch auth token")
+
+
+def send_to_glific_api(flow_id: int, contact_id: int, result: str):
+    try:
+        auth_token = get_auth_token()
+        response = requests.post(
+            GLIFIC_SEND_URL,
+            json={
+                "flowId": flow_id,
+                "contactId": contact_id,
+                "result": json.dumps({"message": result}),
+            },
+            headers={
+                "authorization": f"{auth_token}",
+                "Content-Type": "application/json",
+            },
+        )
+        response.raise_for_status()
+        print("Successfully sent data to Glific API:", response.json())
+        return {"status": "Success", "data": response.json()}
+    except requests.HTTPError as error:
+        print("Error sending data to Glific API:", error)
+        raise HTTPException(status_code=500, detail="Error sending data to Glific API")
+
 
 @app.post("/backend/generateAUD")
 async def stop_recording_endpoint(req : Request):
@@ -282,7 +359,6 @@ async def receive_data(req: Request):
     print("first chat fetch done")
     if len(chats) == 0:
         message = f'Hello i am Siva your AI proctor, Are you ready!! first question for you is, {questions[0]}'
-        # speak(message)
         addToChat(type = 'AI',message = message,index = contents['index'])
         chats = fetchChat(contents['index'])
     return {'status_code': status.HTTP_200_OK, 'chat':chats}
@@ -297,7 +373,6 @@ async def upload_file(req: Request):
     index = contents['index']
     addToChat(type = 'User',message = text , index=index)
     reply = genReply(text,qn,index)
-    # speak(reply)
     addToChat(type = 'AI',message = reply,index = index)
     chats = fetchChat(index)
     return {'status_code':status.HTTP_200_OK,'chat':chats}
@@ -321,6 +396,66 @@ async def stop_recording_endpoint(req : Request):
     qna = getQnA(text)
     saveQnA(qna,index)
     return{'status_code':status.HTTP_200_OK}
+
+@app.post("/backend/publish")
+async def publish_to_sns(request: Request):
+    try:
+        # Publish message to SNS with attributes
+        request = await request.json()
+        sns_response = sns_client.publish(
+            TopicArn=SNS_TOPIC_ARN,
+            Message=request['message'],
+            MessageAttributes={
+                'contactId': {
+                    'DataType': 'Number',
+                    'StringValue': str(request['contactId'])
+                },
+                'flowId': {
+                    'DataType': 'Number',
+                    'StringValue': str(request['flowId'])
+                }
+            }
+        )
+        print(f"Message sent to SNS, MessageId: {sns_response['MessageId']}")
+        return {"status": "Message sent to SNS successfully", "MessageId": sns_response['MessageId']}
+
+    except (BotoCoreError, ClientError) as error:
+        print(f"Failed to publish message to SNS: {error}")
+        raise HTTPException(status_code=500, detail="Failed to send message to SNS")
+    
+
+
+@app.post("/backend/sns")
+async def sns_listener(request: Request):
+    headers = request.headers
+    message_type = headers.get("x-amz-sns-message-type")
+
+    if not message_type:
+        raise HTTPException(status_code=400, detail="Invalid message type header")
+
+    body = await request.json()
+
+    # Check if it's a SubscriptionConfirmation message
+    if message_type == "SubscriptionConfirmation" and body['SubscribeURL']:
+        # Confirm the subscription
+        response = requests.get(body['SubscribeURL'])
+        if response.status_code == 200:
+            print("Subscription confirmed.")
+        else:
+            print("Failed to confirm subscription.")
+        return {"status": "Subscription confirmation handled"}
+
+    # Handle Notification message
+    elif message_type == "Notification":
+        print(f"Received notification: {body['Message']}")
+        # Retrieve contactId and flowId from MessageAttributes
+        message_attributes = body['MessageAttributes'] or {}
+        contact_id = message_attributes.get('contactId', {}).get('Value')
+        flow_id = message_attributes.get('flowId', {}).get('Value')
+        result  = await run_script(body['Message'])
+        await send_to_glific_api(result , flow_id , contact_id)
+    # If unknown message type, return 400 error
+    raise HTTPException(status_code=400, detail="Unknown message type")
 
 
 
