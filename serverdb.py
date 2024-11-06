@@ -298,29 +298,49 @@ def get_auth_token():
     except requests.HTTPError as error:
         print("Error fetching auth token:", error)
         raise HTTPException(status_code=500, detail="Unable to fetch auth token")
+        print("Error fetching auth token:", error)
+        raise HTTPException(status_code=500, detail="Unable to fetch auth token")
 
 
-def send_to_glific_api(flow_id: int, contact_id: int, result: str):
+async def send_to_glific_api(flow_id: int, contact_id: int, result: str):
+    print("I am sending message")
     try:
         auth_token = get_auth_token()
+        graphql_query = """
+        mutation resumeContactFlow($flowId: ID!, $contactId: ID!, $result: Json!) {
+          resumeContactFlow(flowId: $flowId, contactId: $contactId, result: $result) {
+            success
+            errors {
+                key
+                message
+            }
+          }
+        }
+        """
+        graphql_variables = {
+            "flowId":flow_id,
+            "contactId":contact_id,
+            "result":f"{{\"result\":{{\"message\":\"{result}\"}}}}"
+        }
+        headers = {
+            "authorization": f"{auth_token}",
+            "Content-Type": "application/json",
+        }
+
         response = requests.post(
             GLIFIC_SEND_URL,
             json={
-                "flowId": flow_id,
-                "contactId": contact_id,
-                "result": json.dumps({"message": result}),
+                "query": graphql_query,
+                "variables": graphql_variables
             },
-            headers={
-                "authorization": f"{auth_token}",
-                "Content-Type": "application/json",
-            },
+            headers=headers
         )
+
         response.raise_for_status()
-        print("Successfully sent data to Glific API:", response.json())
-        return {"status": "Success", "data": response.json()}
-    except requests.HTTPError as error:
-        print("Error sending data to Glific API:", error)
-        raise HTTPException(status_code=500, detail="Error sending data to Glific API")
+        return response.json()
+
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"Error sending data to Glific API: {e}")
 
 
 @app.post("/backend/generateAUD")
@@ -401,6 +421,7 @@ async def stop_recording_endpoint(req : Request):
 async def publish_to_sns(request: Request):
     try:
         # Publish message to SNS with attributes
+        print(SNS_TOPIC_ARN)
         request = await request.json()
         sns_response = sns_client.publish(
             TopicArn=SNS_TOPIC_ARN,
@@ -452,10 +473,14 @@ async def sns_listener(request: Request):
         message_attributes = body['MessageAttributes'] or {}
         contact_id = message_attributes.get('contactId', {}).get('Value')
         flow_id = message_attributes.get('flowId', {}).get('Value')
+        print(flow_id)
+        print(contact_id)
         result  = await run_script(body['Message'])
-        await send_to_glific_api(result , flow_id , contact_id)
+        response =  await send_to_glific_api(flow_id , contact_id,result)
+        print("sent to glific successfully: ",response)
     # If unknown message type, return 400 error
-    raise HTTPException(status_code=400, detail="Unknown message type")
+    else:
+        raise HTTPException(status_code=400, detail="Unknown message type")
 
 
 
