@@ -1,4 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, Form , status, Request , Response, HTTPException
+
 from fastapi.responses import FileResponse , JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
@@ -243,7 +244,7 @@ def fetchChat(index):
             chats.append(entry)
     return chats
 
-async def run_script(message: str) -> str:
+async def run_script(message: str, idx : str) -> str:
     try:
         print('Message received from user:', message)
         
@@ -255,7 +256,7 @@ async def run_script(message: str) -> str:
         embedding = response.data[0].embedding
         print('Embeddings created')
         pc = Pinecone(api_key=pinecone_api_key)
-        index = pc.Index(pinecone_database_name)
+        index = pc.Index(idx)
         # Send embedding to Pinecone and perform a query
         pinecone_response = index.query(vector=embedding, top_k=1,include_metadata=True,)
         pinecone_result = "\n".join([match['metadata']['text'] for match in pinecone_response['matches']])
@@ -303,7 +304,7 @@ def get_auth_token():
 
 
 async def send_to_glific_api(flow_id: int, contact_id: int, result: str):
-    print("I am sending message")
+    print("I am sending message:",result)
     try:
         auth_token = get_auth_token()
         graphql_query = """
@@ -434,6 +435,10 @@ async def publish_to_sns(request: Request):
                 'flowId': {
                     'DataType': 'Number',
                     'StringValue': str(request['flowId'])
+                },
+                 'idx': {
+                    'DataType': 'String',
+                    'StringValue': request['idx']
                 }
             }
         )
@@ -473,9 +478,12 @@ async def sns_listener(request: Request):
         message_attributes = body['MessageAttributes'] or {}
         contact_id = message_attributes.get('contactId', {}).get('Value')
         flow_id = message_attributes.get('flowId', {}).get('Value')
+        idx = message_attributes.get('idx', {}).get('Value')
         print(flow_id)
         print(contact_id)
-        result  = await run_script(body['Message'])
+        result  = await run_script(body['Message'],idx)
+        result = repr(result).strip("'\"")
+        #result_formatted = repr(result).strip("'").replace("\\", "\\\\")
         response =  await send_to_glific_api(flow_id , contact_id,result)
         print("sent to glific successfully: ",response)
     # If unknown message type, return 400 error
