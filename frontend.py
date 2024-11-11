@@ -4,19 +4,21 @@ from util import *
 import queue, wave
 import sounddevice as sd
 import numpy as np
-from audio_recorder_streamlit import audio_recorder  # Import audio recorder snippet
+from audio_recorder_streamlit import audio_recorder
 from io import StringIO
 from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
 from pdfminer.converter import TextConverter
 from pdfminer.layout import LAParams
 from pdfminer.pdfpage import PDFPage
+from dotenv import load_dotenv
+load_dotenv()
+BASE_URL = os.getenv("BASE_URL")
 
-# Constants
 user_id = 'shariq'
 sample_rate = 44100
 
 def fetch_audio(text):
-    response = requests.post(f"https://salescoach.yogyabano.com/backend/generateAUD", json={"text": text})
+    response = requests.post(f"{BASE_URL}/backend/generateAUD", json={"text": text})
     if response.status_code == 200:
         return response.content
     else:
@@ -30,13 +32,6 @@ def play_audio(audio_data):
         # Display audio player in Streamlit
         audio_bytes = open('output.wav', 'rb').read()
         st.audio(audio_bytes, format='audio/wav')
-
-def save_wav_file(filename, audio_data, sample_rate=22050, num_channels=1):
-    with wave.open(filename, 'wb') as wf:
-        wf.setnchannels(num_channels)
-        wf.setsampwidth(2)  # assuming 16-bit audio
-        wf.setframerate(sample_rate)
-        wf.writeframes(audio_data)
 
 @st.cache_data
 def convert_pdf_to_txt_file(path):
@@ -132,7 +127,7 @@ if option == NEW_INDEX:
         if st.button("Generate Responses"):
             name = uploaded_file.name
             raw_text = convert_pdf_to_txt_file(uploaded_file)
-            response = requests.post("https://salescoach.yogyabano.com/backend/createQuestionAnswer", json={"index": otherOption, "text": raw_text})
+            response = requests.post(f"{BASE_URL}/backend/createQuestionAnswer", json={"index": otherOption, "text": raw_text})
             st.write(f"File upload status: {response.status_code}")
     option = otherOption
 
@@ -140,14 +135,15 @@ st.write(f"Selected option: {option}")
 
 # Start Test Button (same as before)
 if st.button('Start Test'):
+    print("fuck")
     st.session_state['start'] = True
 
 if st.session_state['start']:
     if option:
-        response = requests.post(f"https://salescoach.yogyabano.com/backend/fetch_questions/{option}")
+        response = requests.post(f"{BASE_URL}/backend/fetch_questions/{option}")
         if response.json()['message'] == "Ok":
 
-            response = requests.post(f"https://salescoach.yogyabano.com/backend/fetch_chats", json={'index': option, 'user_id': 'shariq'}).json()
+            response = requests.post(f"{BASE_URL}/backend/fetch_chats", json={'index': option, 'user_id': 'shariq'}).json()
             st.session_state['chat_history'] = response['chat']
             st.write("### Audio Recorder")
             recorder_audio = audio_recorder(text="Click to Record / Stop")
@@ -157,7 +153,7 @@ if st.session_state['start']:
                 save_wav_file2(audio_path, recorder_audio)
                 st.write("Audio recording saved!")
 
-                response = requests.post(f"https://salescoach.yogyabano.com/backend/stopRecording",json={'index': option})
+                response = requests.post(f"{BASE_URL}/backend/stopRecording",json={'index': option})
 
                 if response.status_code == 200:
                     result = response.json()

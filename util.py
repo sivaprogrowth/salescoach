@@ -4,6 +4,7 @@ import cv2  # We're using OpenCV to read video, to install !pip install opencv-p
 import base64
 from dotenv import load_dotenv
 import os
+import wave
 load_dotenv()
 
 os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
@@ -195,4 +196,9 @@ def audio_to_text(path):
     )
     return translation.text
 
-#
+def save_wav_file(filename, audio_data, sample_rate=22050, num_channels=1):
+    with wave.open(filename, 'wb') as wf:
+        wf.setnchannels(num_channels)
+        wf.setsampwidth(2)  # assuming 16-bit audio
+        wf.setframerate(sample_rate)
+        wf.writeframes(audio_data)

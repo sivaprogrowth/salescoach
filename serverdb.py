@@ -7,15 +7,18 @@ from util import *
 from datetime import datetime
 from pinecone import Pinecone
 from botocore.exceptions import BotoCoreError, ClientError
+from pydub import AudioSegment
+from dotenv import load_dotenv
 import scipy.io.wavfile as wavfile 
+import numpy as np
+import sounddevice as sd
 import pyaudio
 import os , json
 import mysql.connector
-from dotenv import load_dotenv
-import sounddevice as sd
-import numpy as np
 import queue
 import requests
+import mimetypes
+import io
 import boto3
 load_dotenv()
 
@@ -29,12 +32,15 @@ connection = mysql.connector.connect(
 )
 
 sns_client = boto3.client('sns', region_name='ap-south-1')
+s3 = boto3.client('s3')
 SNS_TOPIC_ARN = os.getenv('SNS_TOPIC_ARN') 
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
+AUDIO_DATA_FOLDER = os.getenv("AUDIO_DATA_FOLDER")
 # Glific API credentials
-GLIFIC_PHONE_NUMBER = "918420925890"  # Update with the required phone number
-GLIFIC_PASSWORD = "ALLAHuAKBAR@123"   # Update with the required password
-GLIFIC_AUTH_URL = "https://api.yogyabano.glific.com/api/v1/session"
-GLIFIC_SEND_URL = "https://api.yogyabano.glific.com/api"
+GLIFIC_PHONE_NUMBER = os.getenv("GLIFIC_PHONE_NUMBER")
+GLIFIC_PASSWORD = os.getenv("GLIFIC_PASSWORD")
+GLIFIC_AUTH_URL = os.getenv("GLIFIC_AUTH_URL")
+GLIFIC_SEND_URL = os.getenv("GLIFIC_SEND_URL")
 pinecone_api_key = os.getenv("PINECONE_API_KEY")
 pinecone_database_name = os.getenv("PINECONE_DATABASE_NAME")
 
@@ -199,7 +205,7 @@ It is compulsory for you to rate the salesperson response. """},
     )
     result = result.choices[0].message.content
     if(qnum+1) == len(questions):
-        return result
+        return result + f"That was the feed back I had. Thanks for taking the test."
     else :
         return result + f"That was the feed back I had . now your next question is \n {questions[qn+1]}"
 
@@ -343,7 +349,38 @@ async def send_to_glific_api(flow_id: int, contact_id: int, result: str):
     except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=500, detail=f"Error sending data to Glific API: {e}")
 
+def upload_audio_to_s3(audio_file_path):
 
+    s3_folder = AUDIO_DATA_FOLDER
+    audio_file_name = os.path.basename(audio_file_path)
+    s3_key = os.path.join(s3_folder, audio_file_name)
+    try:
+        s3.upload_file(
+            audio_file_path,
+            S3_BUCKET_NAME,
+            s3_key,
+            ExtraArgs={'ContentType': mimetypes.guess_type(audio_file_path)[0]}
+        )
+        audio_url = f"https://{S3_BUCKET_NAME}.s3.ap-south-1.amazonaws.com/{s3_key}"
+        print(f"Uploaded audio file to {audio_url}")
+        return audio_url
+    except ClientError as e:
+        print(f"Error uploading audio file to {S3_BUCKET_NAME}/{s3_key}: {e}")
+        return None
+    
+def download_audio(url, output_file, output_format="mp3"):
+    try:
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+        audio = AudioSegment.from_ogg(io.BytesIO(response.content))
+        audio.export(output_file, format=output_format)
+        print(f"File downloaded and converted to {output_format.upper()}: {output_file}")
+    
+    except requests.exceptions.RequestException as e:
+        print(f"Error downloading the audio: {e}")
+    except Exception as e:
+        print(f"Error processing the audio: {e}")
+    
 @app.post("/backend/generateAUD")
 async def stop_recording_endpoint(req : Request):
     content = await req.json()
@@ -490,7 +527,56 @@ async def sns_listener(request: Request):
     else:
         raise HTTPException(status_code=400, detail="Unknown message type")
 
+@app.post("/backend/fetchChatVoice")
+async def fetchChatVoice(req: Request):
 
+    print("Fetching chat voice...")
+    content = await req.json()
+    option = content['option']
+    print(f"Option received: {option}")
+    response = requests.post(f"https://salescoach.yogyabano.com/backend/fetch_chats", json={'index': option, 'user_id': 'shariq'}).json()
+
+    if 'chat' not in response:
+        print("Error: 'chat' key not found in the response.")
+        return {'status_code': status.HTTP_500_INTERNAL_SERVER_ERROR, 'message': 'Error fetching chat'}
+    
+    chats = response['chat']    
+    length = len(chats) - 1
+    audio_data = chats[length]['message']    
+    current_datetime = datetime.now()
+    datetime_string = current_datetime.strftime("%Y%m%d%H%M%S")
+    file_name = f"output_{datetime_string}.wav"
+    print(f"Saving audio data to {file_name}...")
+
+    save_wav_file(file_name, audio_data)
+    audio_url = upload_audio_to_s3(file_name)
+    print(f"Audio file uploaded to S3. URL: {audio_url}")
+    
+    # Remove the local file after uploading
+    print(f"Removing local file {file_name}...")
+    os.remove(file_name)
+    return {'status_code': status.HTTP_200_OK, 'audio_url': audio_url, 'text':audio_data} 
+
+@app.post("/backend/stopRecordingVoice")
+async def fetchChatVoice(req: Request):
+    content  = await req.json()
+    url = content['url']
+    download_audio(url,"reply2.wav", "wav")
+    text = transcribe()
+    qn = qn+1
+    index = content['index']
+    addToChat(type = 'User',message = text , index=index)
+    reply = genReply(text,qn,index)
+    addToChat(type = 'AI',message = reply,index = index)
+    return {'status_code':status.HTTP_200_OK}
+
+@app.post("/backend/clearChat")
+async def fetchChatVoice(req: Request):
+    content  = await req.json()
+    index = content['index']
+    user_id = 1
+    cursor.execute(f"DELETE FROM chats WHERE `index` = {index}")
+    return {'status_code':status.HTTP_200_OK}
 
 if __name__ == "__main__":
     import uvicorn
