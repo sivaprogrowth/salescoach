@@ -1,5 +1,4 @@
 from fastapi import FastAPI, UploadFile, File, Form , status, Request , Response, HTTPException
-
 from fastapi.responses import FileResponse , JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
@@ -20,6 +19,8 @@ import requests
 import mimetypes
 import io
 import boto3
+import tempfile
+import shutil
 load_dotenv()
 
 DATABASE = os.getenv('DATABASE')
@@ -34,6 +35,7 @@ connection = mysql.connector.connect(
 sns_client = boto3.client('sns', region_name='ap-south-1')
 s3 = boto3.client('s3')
 SNS_TOPIC_ARN = os.getenv('SNS_TOPIC_ARN') 
+SNS_TOPIC_TEXT_RAG_ARN = os.getenv('SNS_TOPIC_TEXT_RAG_ARN')
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 AUDIO_DATA_FOLDER = os.getenv("AUDIO_DATA_FOLDER")
 # Glific API credentials
@@ -43,6 +45,7 @@ GLIFIC_AUTH_URL = os.getenv("GLIFIC_AUTH_URL")
 GLIFIC_SEND_URL = os.getenv("GLIFIC_SEND_URL")
 pinecone_api_key = os.getenv("PINECONE_API_KEY")
 pinecone_database_name = os.getenv("PINECONE_DATABASE_NAME")
+
 
 cursor = connection.cursor()
 
@@ -577,6 +580,108 @@ async def fetchChatVoice(req: Request):
     user_id = 1
     cursor.execute(f"DELETE FROM chats WHERE `index` = {index}")
     return {'status_code':status.HTTP_200_OK}
+
+app.post("/backend/publishTextRag")
+async def publish_to_sns(request: Request):
+    try:
+        # Publish message to SNS with attributes
+        current_datetime = datetime.now()
+        datetime_string = current_datetime.strftime("%Y%m%d%H%M%S")
+        print(SNS_TOPIC_TEXT_RAG_ARN)
+        request = await request.json()
+        sns_response = sns_client.publish(
+            TopicArn=SNS_TOPIC_ARN,
+            Message=request['message'],
+            MessageAttributes={
+                'transactionId': {
+                    'DataType': 'Number',
+                    'StringValue': datetime_string
+                },
+                 'idx': {
+                    'DataType': 'String',
+                    'StringValue': request['idx']
+                }
+            }
+        )
+        print(f"Message sent to SNS, MessageId: {sns_response['MessageId']}")
+        return {"status": "Message sent to SNS successfully", "MessageId": sns_response['MessageId'], "TransactionId":datetime_string}
+    
+    except (BotoCoreError, ClientError) as error:
+        print(f"Failed to publish message to SNS: {error}")
+        raise HTTPException(status_code=500, detail="Failed to send message to SNS")
+    
+@app.post("/backend/snsTextRag")
+async def sns_listener(request: Request):
+    headers = request.headers
+    message_type = headers.get("x-amz-sns-message-type")
+
+    if not message_type:
+        raise HTTPException(status_code=400, detail="Invalid message type header")
+    body = await request.json()
+
+    # Check if it's a SubscriptionConfirmation message
+    if message_type == "SubscriptionConfirmation" and body['SubscribeURL']:
+        # Confirm the subscription
+        response = requests.get(body['SubscribeURL'])
+        if response.status_code == 200:
+            print("Subscription confirmed.")
+        else:
+            print("Failed to confirm subscription.")
+        return {"status": "Subscription confirmation handled"}
+
+    # Handle Notification message
+    elif message_type == "Notification":
+        print(f"Received notification: {body['Message']}")
+        # Retrieve contactId and flowId from MessageAttributes
+        message_attributes = body['MessageAttributes'] or {}
+        transactionId = message_attributes.get('transactionId', {}).get('Value')
+        idx = message_attributes.get('idx', {}).get('Value')
+        result  = await run_script(body['Message'],idx)
+        data = (
+            result, # message
+            transactionId,  # transactionId
+            idx 
+        )
+        insert_query = """
+                            INSERT INTO textRag (message, tranId, idx) 
+                            VALUES (%s, %s, %s)
+                        """
+        cursor.execute(insert_query, data)
+        connection.commit()
+        print("sent to glific successfully: ",response)
+    # If unknown message type, return 400 error
+    else:
+        raise HTTPException(status_code=400, detail="Unknown message type")
+    
+@app.post("/backend/retriever")
+def getMessage(req :Request):
+
+    tranId = req.json()['transactionId']
+    cursor.execute(f"select message from textRag where tranId = '{tranId}'")
+    result = cursor.fetchall()
+    if result != []:
+        return {"status_code": status.HTTP_200_OK, "Message": result[0][0]}
+    else:
+        print(f"Process in wait ")
+        return {"status_code": status.HTTP_202_OK}
+
+@app.post("/backend/upload-pdf/")
+async def upload_pdf(file: UploadFile = File(...),idx: int = Form(...),file_name: str = Form(...)):
+
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
+        temp_file_name = temp_file.name
+        shutil.copyfileobj(file.file, temp_file)
+    
+    # Convert PDF to text
+    try:
+        text = convert_pdf_to_txt_file(temp_file_name)
+        upload_file_to_pinecone(text, file_name, idx)
+    finally:
+        # Clean up the temporary file
+        temp_file.close()
+    
+    return {"filename": file.filename, "content": text}
 
 if __name__ == "__main__":
     import uvicorn

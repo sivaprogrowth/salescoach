@@ -5,11 +5,6 @@ import queue, wave
 import sounddevice as sd
 import numpy as np
 from audio_recorder_streamlit import audio_recorder
-from io import StringIO
-from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
-from pdfminer.converter import TextConverter
-from pdfminer.layout import LAParams
-from pdfminer.pdfpage import PDFPage
 from dotenv import load_dotenv
 load_dotenv()
 BASE_URL = os.getenv("BASE_URL")
@@ -32,24 +27,6 @@ def play_audio(audio_data):
         # Display audio player in Streamlit
         audio_bytes = open('output.wav', 'rb').read()
         st.audio(audio_bytes, format='audio/wav')
-
-@st.cache_data
-def convert_pdf_to_txt_file(path):
-    rsrcmgr = PDFResourceManager()
-    retstr = StringIO()
-    laparams = LAParams()
-    device = TextConverter(rsrcmgr, retstr, laparams=laparams)
-    interpreter = PDFPageInterpreter(rsrcmgr, device)
-    
-    file_pages = PDFPage.get_pages(path)
-    nbPages = len(list(file_pages))
-    for page in PDFPage.get_pages(path):
-        interpreter.process_page(page)
-        t = retstr.getvalue()
-
-    device.close()
-    retstr.close()
-    return t 
 
 # Audio Recorder Integration
 def save_wav_file2(filename, audio_data):

@@ -5,6 +5,11 @@ import base64
 from dotenv import load_dotenv
 import os
 import wave
+from io import StringIO
+from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
+from pdfminer.converter import TextConverter
+from pdfminer.layout import LAParams
+from pdfminer.pdfpage import PDFPage
 load_dotenv()
 
 os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
@@ -202,3 +207,21 @@ def save_wav_file(filename, audio_data, sample_rate=22050, num_channels=1):
         wf.setsampwidth(2)  # assuming 16-bit audio
         wf.setframerate(sample_rate)
         wf.writeframes(audio_data)
+
+@st.cache_data
+def convert_pdf_to_txt_file(path):
+    rsrcmgr = PDFResourceManager()
+    retstr = StringIO()
+    laparams = LAParams()
+    device = TextConverter(rsrcmgr, retstr, laparams=laparams)
+    interpreter = PDFPageInterpreter(rsrcmgr, device)
+    
+    file_pages = PDFPage.get_pages(path)
+    nbPages = len(list(file_pages))
+    for page in PDFPage.get_pages(path):
+        interpreter.process_page(page)
+        t = retstr.getvalue()
+
+    device.close()
+    retstr.close()
+    return t 
