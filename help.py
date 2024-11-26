@@ -1,9 +1,7 @@
 import streamlit as st
 import requests
-from util import *
-import queue, wave
-import sounddevice as sd
-import numpy as np
+from util import * #noqa
+import wave
 from audio_recorder_streamlit import audio_recorder  # Import audio recorder snippet
 from io import StringIO
 from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
@@ -12,31 +10,35 @@ from pdfminer.layout import LAParams
 from pdfminer.pdfpage import PDFPage
 
 # Constants
-user_id = 'shariq'
+user_id = "shariq"
 sample_rate = 44100
 
+
 def fetch_audio(text):
-    response = requests.post(f"http://0.0.0.0:8000/generateAUD", json={"text": text})
+    response = requests.post("http://0.0.0.0:8000/generateAUD", json={"text": text})
     if response.status_code == 200:
         return response.content
     else:
         st.write("Failed to fetch audio")
         return None
-    
+
+
 # Function to play audio in browser
 def play_audio(audio_data):
     if audio_data:
         save_wav_file("output.wav", audio_data)
         # Display audio player in Streamlit
-        audio_bytes = open('output.wav', 'rb').read()
-        st.audio(audio_bytes, format='audio/wav')
+        audio_bytes = open("output.wav", "rb").read()
+        st.audio(audio_bytes, format="audio/wav")
+
 
 def save_wav_file(filename, audio_data, sample_rate=22050, num_channels=1):
-    with wave.open(filename, 'wb') as wf:
+    with wave.open(filename, "wb") as wf:
         wf.setnchannels(num_channels)
         wf.setsampwidth(2)  # assuming 16-bit audio
         wf.setframerate(sample_rate)
         wf.writeframes(audio_data)
+
 
 @st.cache_data
 def convert_pdf_to_txt_file(path):
@@ -45,24 +47,27 @@ def convert_pdf_to_txt_file(path):
     laparams = LAParams()
     device = TextConverter(rsrcmgr, retstr, laparams=laparams)
     interpreter = PDFPageInterpreter(rsrcmgr, device)
-    
-    file_pages = PDFPage.get_pages(path)
-    nbPages = len(list(file_pages))
+
+    # file_pages = PDFPage.get_pages(path)
+    # nbPages = len(list(file_pages))
     for page in PDFPage.get_pages(path):
         interpreter.process_page(page)
         t = retstr.getvalue()
 
     device.close()
     retstr.close()
-    return t 
+    return t
+
 
 # Audio Recorder Integration
 def save_wav_file2(filename, audio_data):
-    with open(filename, 'wb') as f:
+    with open(filename, "wb") as f:
         f.write(audio_data)
 
+
 # Custom CSS for styling (same as before)
-st.markdown("""
+st.markdown(
+    """
     <style>
     body {
         background-color: #FFFFFF;
@@ -102,16 +107,18 @@ st.markdown("""
         color: #FFFFFF;
     }
     </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 # Ensure session states are initialized
-if 'start' not in st.session_state:
-    st.session_state['start'] = False
+if "start" not in st.session_state:
+    st.session_state["start"] = False
 
-st.title('Welcome to AI Powered Sales Coach')
+st.title("Welcome to AI Powered Sales Coach")
 # Step 1: Drop-down Selector (same as before)
 NEW_INDEX = "(New index)"
-options = get_index_list().names() + [NEW_INDEX]
+options = get_index_list().names() + [NEW_INDEX] #noqa
 option = st.selectbox("Select an option", options)
 
 # Upload file and handle file upload logic (same as before)
@@ -119,7 +126,7 @@ if option == NEW_INDEX:
     otherOption = st.text_input("Enter your other option...")
     if otherOption:
         selection = otherOption
-        index_init(otherOption, 1536)
+        index_init(otherOption, 1536) #noqa
         st.info(f":white_check_mark: New index {otherOption} created!")
 
     uploaded_file = st.file_uploader("Upload a file", type=["txt", "pdf", "docx"])
@@ -128,23 +135,29 @@ if option == NEW_INDEX:
         if st.button("Generate Responses"):
             name = uploaded_file.name
             raw_text = convert_pdf_to_txt_file(uploaded_file)
-            response = requests.post("http://localhost:8000/createQuestionAnswer", json={"index": otherOption, "text": raw_text})
+            response = requests.post(
+                "http://localhost:8000/createQuestionAnswer",
+                json={"index": otherOption, "text": raw_text},
+            )
             st.write(f"File upload status: {response.status_code}")
     option = otherOption
 
 st.write(f"Selected option: {option}")
 
 # Start Test Button (same as before)
-if st.button('Start Test'):
-    st.session_state['start'] = True
+if st.button("Start Test"):
+    st.session_state["start"] = True
 
-if st.session_state['start']:
+if st.session_state["start"]:
     if option:
         response = requests.post(f"http://0.0.0.0:8000/fetch_questions/{option}")
-        if response.json()['message'] == "Ok":
+        if response.json()["message"] == "Ok":
 
-            response = requests.get(f"http://0.0.0.0:8000/fetch_chats/", json={'index': option, 'user_id': 'shariq'}).json()
-            st.session_state['chat_history'] = response['chat']
+            response = requests.get(
+                "http://0.0.0.0:8000/fetch_chats/",
+                json={"index": option, "user_id": "shariq"},
+            ).json()
+            st.session_state["chat_history"] = response["chat"]
             st.write("### Audio Recorder")
             recorder_audio = audio_recorder(text="Click to Record / Stop")
 
@@ -153,23 +166,33 @@ if st.session_state['start']:
                 save_wav_file2(audio_path, recorder_audio)
                 st.write("Audio recording saved!")
 
-                response = requests.post(f"http://0.0.0.0:8000/stopRecording",json={'index': option})
+                response = requests.post(
+                    "http://0.0.0.0:8000/stopRecording", json={"index": option}
+                )
 
                 if response.status_code == 200:
                     result = response.json()
-                    st.session_state['chat_history'] = result['chat']
+                    st.session_state["chat_history"] = result["chat"]
                 else:
                     st.write("Failed to process recording.")
 
             # Display chat history (same as before)
-            if st.session_state['chat_history']:
-                lst = len(st.session_state['chat_history']) - 1
-                audio_data = fetch_audio(st.session_state['chat_history'][lst]['message'])
+            if st.session_state["chat_history"]:
+                lst = len(st.session_state["chat_history"]) - 1
+                audio_data = fetch_audio(
+                    st.session_state["chat_history"][lst]["message"]
+                )
                 play_audio(audio_data)
-                for chat in st.session_state['chat_history']:
+                for chat in st.session_state["chat_history"]:
                     if chat["type"] == "user":
-                        st.markdown(f'<div class="user-message">{chat["message"]}</div>', unsafe_allow_html=True)
+                        st.markdown(
+                            f'<div class="user-message">{chat["message"]}</div>',
+                            unsafe_allow_html=True,
+                        )
                     else:
-                        st.markdown(f'<div class="ai-message">{chat["message"]}</div>', unsafe_allow_html=True)
+                        st.markdown(
+                            f'<div class="ai-message">{chat["message"]}</div>',
+                            unsafe_allow_html=True,
+                        )
         else:
             st.write("Please upload a file to fetch relevant question")

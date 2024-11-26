@@ -18,6 +18,7 @@ import queue
 import requests
 import mimetypes
 import io
+import re
 import boto3
 import tempfile
 import shutil
@@ -383,6 +384,21 @@ def download_audio(url, output_file, output_format="mp3"):
         print(f"Error downloading the audio: {e}")
     except Exception as e:
         print(f"Error processing the audio: {e}")
+
+# Utility Function: Validate Email
+def is_valid_email(email: str) -> bool:
+    email_regex = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
+    return bool(re.match(email_regex, email))
+
+# Utility Function: Fetch User by Email
+def get_user_by_email(email: str):
+    cursor.execute("SELECT * FROM login WHERE email = %s", (email,))
+    return cursor.fetchone()
+
+# Utility Function: Add User to Database
+def add_user(email: str, password: str):
+    cursor.execute("INSERT INTO login (email, password) VALUES (%s, %s)", (email, password))
+    connection.commit()
     
 @app.post("/backend/generateAUD")
 async def stop_recording_endpoint(req : Request):
@@ -666,8 +682,7 @@ def getMessage(req :Request):
         return {"status_code": status.HTTP_202_OK}
 
 @app.post("/backend/upload-pdf/")
-async def upload_pdf(file: UploadFile = File(...),idx: int = Form(...),file_name: str = Form(...)):
-
+async def upload_pdf(file: UploadFile = File(...), idx: int = Form(...), file_name: str = Form(...)):
     # Create a temporary file
     if file is None:
         print("no file")
@@ -677,15 +692,49 @@ async def upload_pdf(file: UploadFile = File(...),idx: int = Form(...),file_name
         temp_file_name = temp_file.name
         shutil.copyfileobj(file.file, temp_file)
     
-    # Convert PDF to text
     try:
-        text = convert_pdf_to_txt_file(temp_file_name)
+        # Open the temporary file in binary read mode and pass the file object
+        with open(temp_file_name, "rb") as pdf_file:
+            text = convert_pdf_to_txt_file(pdf_file)
+        
+        # Upload the extracted text to Pinecone
         upload_file_to_pinecone(text, file_name, idx)
     finally:
-        # Clean up the temporary file
-        temp_file.close()
+        # Ensure the temporary file is deleted
+        os.remove(temp_file_name)
     
     return {"filename": file.filename, "content": text}
+
+
+@app.post("/backend/login")
+async def login(request: Request):
+    data = await request.json()
+    email = data.get("email")
+    password = data.get("password")
+
+    # Validate email format
+    if not is_valid_email(email):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid email format."
+        )
+
+    # Fetch user by email
+    user = get_user_by_email(email)
+
+    if user:
+        # Check if password matches
+        if user[1] == password:  # Assuming `password` is the second column in `users`
+            return {"status_code": status.HTTP_200_OK, "message": "Login successful"}
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Incorrect password."
+            )
+    else:
+        # Add new user to the database
+        add_user(email, password)
+        return {"status_code": status.HTTP_200_OK, "message": "User created successfully"}
 
 if __name__ == "__main__":
     import uvicorn
