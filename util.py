@@ -208,7 +208,7 @@ def save_wav_file(filename, audio_data, sample_rate=22050, num_channels=1):
         wf.setframerate(sample_rate)
         wf.writeframes(audio_data)
 
-@st.cache_data
+
 def convert_pdf_to_txt_file(path):
     rsrcmgr = PDFResourceManager()
     retstr = StringIO()

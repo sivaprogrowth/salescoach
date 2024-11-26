@@ -26,8 +26,8 @@ load_dotenv()
 DATABASE = os.getenv('DATABASE')
 PASSWD = os.getenv('PASSWD')
 connection = mysql.connector.connect(
-    user = 'root',
-    host = 'localhost',
+    user = 'admin',
+    host = 'salescoachdatabase-1.ctkqiaw8wxwq.ap-south-1.rds.amazonaws.com',
     database = DATABASE,
     passwd = PASSWD
 )
@@ -669,6 +669,10 @@ def getMessage(req :Request):
 async def upload_pdf(file: UploadFile = File(...),idx: int = Form(...),file_name: str = Form(...)):
 
     # Create a temporary file
+    if file is None:
+        print("no file")
+        raise HTTPException(status_code=400, detail="File not provided.")
+    print("all okh")
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
         temp_file_name = temp_file.name
         shutil.copyfileobj(file.file, temp_file)
