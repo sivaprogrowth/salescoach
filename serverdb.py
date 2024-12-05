@@ -751,13 +751,14 @@ def get_one_course(course_id: int):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
     return {"status_code": status.HTTP_200_OK, "data": course}
 
-@app.get("/backend/courses")
+@app.get("/backend/allCourses/{company_id}")
 def get_all_courses(
+    company_id: int = Query(None, description="company id which is an integer"),
     date: str = Query(None, description="Filter by a specific date (format: YYYY-MM-DD)"),
     latest_added: bool = Query(None, description="Filter by the most recently added courses"),
 ):
     try:
-        courses = get_all_courses(date=date, latest_added=latest_added)
+        courses = get_all_courses_service(company_id=company_id, date=date, latest_added=latest_added)
 
         if not courses:
             raise HTTPException(status_code=404, detail="No courses found")

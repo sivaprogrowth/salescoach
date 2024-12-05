@@ -93,6 +93,33 @@ def delete_course_services(course_id):
     db.execute(query, (course_id,))
     connection.commit()
 
+def get_all_courses_service(company_id, date=None, latest_added=None):
+    """
+    Fetch courses filtered by company_id with optional date and latest_added filters.
+    """
+    # Base query
+    query = "SELECT * FROM courses WHERE company_id = %s"
+    filters = []
+    values = [company_id]  # Initial value for the company_id filter
+
+    # Apply date filter if provided
+    if date:
+        filters.append("created_at::date = %s")
+        values.append(date)
+
+    # Add ordering for the latest added filter
+    if latest_added:
+        query += " ORDER BY created_at DESC"
+
+    # Append additional filters to the WHERE clause
+    if filters:
+        query += " AND " + " AND ".join(filters)
+
+    # Execute the query with parameterized values
+    db.execute(query, tuple(values))
+    return db.fetchall()
+
+
 # CRUD functions for lessons
 def create_lesson(data):
     query = """
