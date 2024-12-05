@@ -1,8 +1,9 @@
-from fastapi import FastAPI, UploadFile, File, Form , status, Request , Response, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form , status, Request , Response, HTTPException, Query
 from fastapi.responses import FileResponse , JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 from util import *
+from service import *
 from datetime import datetime
 from pinecone import Pinecone
 from botocore.exceptions import BotoCoreError, ClientError
@@ -735,6 +736,121 @@ async def login(request: Request):
         # Add new user to the database
         add_user(email, password)
         return {"status_code": status.HTTP_200_OK, "message": "User created successfully"}
+    
+@app.post("/backend/courses")
+async def create_course(req: Request):
+    data = await req.json()
+    print(data)
+    course_id = create_courses_service(data)
+    return {"status_code": status.HTTP_201_CREATED, "message": "Course created successfully", "course_id": course_id}
+
+@app.get("/backend/courses/{course_id}")
+def get_one_course(course_id: int):
+    course = get_one_course_service(course_id)
+    if not course:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
+    return {"status_code": status.HTTP_200_OK, "data": course}
+
+@app.get("/backend/courses")
+def get_all_courses(
+    date: str = Query(None, description="Filter by a specific date (format: YYYY-MM-DD)"),
+    latest_added: bool = Query(None, description="Filter by the most recently added courses"),
+):
+    try:
+        courses = get_all_courses(date=date, latest_added=latest_added)
+
+        if not courses:
+            raise HTTPException(status_code=404, detail="No courses found")
+
+        return {"status_code": 200, "data": courses}
+    except Exception as e:
+        return {"status_code": 500, "message": str(e)}
+    
+@app.put("/backend/courses/{course_id}")
+async def update_courses(req: Request, course_id: int):
+    data = await req.json()
+    update_course_service(course_id, data)
+    return {"status_code": status.HTTP_200_OK, "message": "Course updated successfully"}
+
+@app.delete("/backend/courses/{course_id}")
+def delete_courses(course_id: int):
+    delete_course_services(course_id)
+    return {"status_code": status.HTTP_200_OK, "message": "Course deleted successfully"}
+
+# Lessons APIs
+@app.post("/backend/lessons")
+def create_lesson(req: Request):
+    data = req.json()
+    lesson_id = create_lesson(data)
+    return {"status_code": status.HTTP_201_CREATED, "message": "Lesson created successfully", "lesson_id": lesson_id}
+
+@app.get("/backend/lessons/{lesson_id}")
+def get_lesson(lesson_id: int):
+    lesson = get_lesson(lesson_id)
+    if not lesson:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lesson not found")
+    return {"status_code": status.HTTP_200_OK, "data": lesson}
+
+@app.put("/backend/lessons/{lesson_id}")
+def update_lesson(req: Request, lesson_id: int):
+    data = req.json()
+    update_lesson(lesson_id, data)
+    return {"status_code": status.HTTP_200_OK, "message": "Lesson updated successfully"}
+
+@app.delete("/backend/lessons/{lesson_id}")
+def delete_lesson(lesson_id: int):
+    delete_lesson(lesson_id)
+    return {"status_code": status.HTTP_200_OK, "message": "Lesson deleted successfully"}
+
+# Assessments APIs
+@app.post("/backend/assessments")
+def create_assessment(req: Request):
+    data = req.json()
+    assessment_id = create_assessment(data)
+    return {"status_code": status.HTTP_201_CREATED, "message": "Assessment created successfully", "assessment_id": assessment_id}
+
+@app.get("/backend/assessments/{assessment_id}")
+def get_assessment(assessment_id: int):
+    assessment = get_assessment(assessment_id)
+    if not assessment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assessment not found")
+    return {"status_code": status.HTTP_200_OK, "data": assessment}
+
+@app.put("/backend/assessments/{assessment_id}")
+def update_assessment(req: Request, assessment_id: int):
+    data = req.json()
+    update_assessment(assessment_id, data)
+    return {"status_code": status.HTTP_200_OK, "message": "Assessment updated successfully"}
+
+@app.delete("/backend/assessments/{assessment_id}")
+def delete_assessment(assessment_id: int):
+    delete_assessment(assessment_id)
+    return {"status_code": status.HTTP_200_OK, "message": "Assessment deleted successfully"}
+
+# Feedback APIs
+@app.post("/backend/feedbacks")
+def create_feedback(req: Request):
+    data = req.json()
+    feedback_id = create_feedback(data)
+    return {"status_code": status.HTTP_201_CREATED, "message": "Feedback created successfully", "feedback_id": feedback_id}
+
+@app.get("/backend/feedbacks/{feedback_id}")
+def get_feedback(feedback_id: int):
+    feedback = get_feedback(feedback_id)
+    if not feedback:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback not found")
+    return {"status_code": status.HTTP_200_OK, "data": feedback}
+
+@app.put("/backend/feedbacks/{feedback_id}")
+def update_feedback(req: Request, feedback_id: int):
+    data = req.json()
+    update_feedback(feedback_id, data)
+    return {"status_code": status.HTTP_200_OK, "message": "Feedback updated successfully"}
+
+@app.delete("/backend/feedbacks/{feedback_id}")
+def delete_feedback(feedback_id: int):
+    delete_feedback(feedback_id)
+    return {"status_code": status.HTTP_200_OK, "message": "Feedback deleted successfully"}
 
 if __name__ == "__main__":
     import uvicorn
