@@ -774,7 +774,7 @@ def get_one_course(course_id: int):
 
 @app.get("/backend/allCourses/{company_id}", status_code=status.HTTP_200_OK)
 def get_all_courses(
-    company_id: int = Query(None, description="company id which is an integer"),
+    company_id: int ,
     date: str = Query(None, description="Filter by a specific date (format: YYYY-MM-DD)"),
     latest_added: bool = Query(None, description="Filter by the most recently added courses"),
 ):
