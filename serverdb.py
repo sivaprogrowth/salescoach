@@ -737,21 +737,42 @@ async def login(request: Request):
         add_user(email, password)
         return {"status_code": status.HTTP_200_OK, "message": "User created successfully"}
     
-@app.post("/backend/courses")
+@app.post("/backend/courses", status_code=status.HTTP_201_CREATED)
 async def create_course(req: Request):
-    data = await req.json()
-    print(data)
-    course_id = create_courses_service(data)
-    return {"status_code": status.HTTP_201_CREATED, "message": "Course created successfully", "course_id": course_id}
+    try:
+        # Parse the incoming JSON data
+        data = await req.json()
+        print(data)
 
-@app.get("/backend/courses/{course_id}")
+        # Validation checks for required fields
+        required_fields = ["title", "industry", "description", "company_id"]
+        missing_fields = [field for field in required_fields if field not in data or not data[field]]
+
+        if missing_fields:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Missing required fields: {', '.join(missing_fields)}"
+            )
+
+        # If validation passes, proceed to create the course
+        course_id = create_courses_service(data)
+        return {"message": "Course created successfully", "course_id": course_id}
+
+    except Exception as e:
+        # Catch-all for any unexpected exceptions
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred: {str(e)}"
+        )
+
+@app.get("/backend/courses/{course_id}", status_code=status.HTTP_200_OK)
 def get_one_course(course_id: int):
     course = get_one_course_service(course_id)
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
-    return {"status_code": status.HTTP_200_OK, "data": course}
+    return course
 
-@app.get("/backend/allCourses/{company_id}")
+@app.get("/backend/allCourses/{company_id}", status_code=status.HTTP_200_OK)
 def get_all_courses(
     company_id: int = Query(None, description="company id which is an integer"),
     date: str = Query(None, description="Filter by a specific date (format: YYYY-MM-DD)"),
@@ -763,45 +784,45 @@ def get_all_courses(
         if not courses:
             raise HTTPException(status_code=404, detail="No courses found")
 
-        return {"status_code": 200, "data": courses}
+        return courses
     except Exception as e:
-        return {"status_code": 500, "message": str(e)}
+        return HTTPException(status_code=500, detail= str(e))
     
-@app.put("/backend/courses/{course_id}")
+@app.put("/backend/courses/{course_id}", status_code=status.HTTP_200_OK)
 async def update_courses(req: Request, course_id: int):
     data = await req.json()
     update_course_service(course_id, data)
-    return {"status_code": status.HTTP_200_OK, "message": "Course updated successfully"}
+    return {"message": "Course updated successfully"}
 
-@app.delete("/backend/courses/{course_id}")
+@app.delete("/backend/courses/{course_id}", status_code=status.HTTP_200_OK)
 def delete_courses(course_id: int):
     delete_course_services(course_id)
-    return {"status_code": status.HTTP_200_OK, "message": "Course deleted successfully"}
+    return {"message": "Course deleted successfully"}
 
 # Lessons APIs
-@app.post("/backend/lessons")
+@app.post("/backend/lessons",status_code=status.HTTP_201_CREATED)
 def create_lesson(req: Request):
     data = req.json()
     lesson_id = create_lesson(data)
-    return {"status_code": status.HTTP_201_CREATED, "message": "Lesson created successfully", "lesson_id": lesson_id}
+    return {"message": "Lesson created successfully", "lesson_id": lesson_id}
 
-@app.get("/backend/lessons/{lesson_id}")
+@app.get("/backend/lessons/{lesson_id}",status_code=status.HTTP_200_OK)
 def get_lesson(lesson_id: int):
     lesson = get_lesson(lesson_id)
     if not lesson:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lesson not found")
-    return {"status_code": status.HTTP_200_OK, "data": lesson}
+    return {"data": lesson}
 
-@app.put("/backend/lessons/{lesson_id}")
+@app.put("/backend/lessons/{lesson_id}",status_code=status.HTTP_200_OK)
 def update_lesson(req: Request, lesson_id: int):
     data = req.json()
     update_lesson(lesson_id, data)
-    return {"status_code": status.HTTP_200_OK, "message": "Lesson updated successfully"}
+    return {"message": "Lesson updated successfully"}
 
-@app.delete("/backend/lessons/{lesson_id}")
+@app.delete("/backend/lessons/{lesson_id}",status_code=status.HTTP_200_OK)
 def delete_lesson(lesson_id: int):
     delete_lesson(lesson_id)
-    return {"status_code": status.HTTP_200_OK, "message": "Lesson deleted successfully"}
+    return {"message": "Lesson deleted successfully"}
 
 # Assessments APIs
 @app.post("/backend/assessments")

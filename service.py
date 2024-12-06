@@ -16,12 +16,6 @@ connection = mysql.connector.connect(
 db = connection.cursor()
 
 def create_courses_service(data):
-    print('hello')
-    title = data['title']
-    indus = data['industry']
-    des = data['description']
-    id = data['company_id']
-    print(title , indus , des , id)
     query = """
     INSERT INTO courses (title, industry, description, company_id, created_at, updated_at)
     VALUES (%s, %s, %s, %s, NOW(), NOW())
@@ -54,7 +48,20 @@ def get_one_course_service(course_id):
         WHERE c.id = %s
     """
     db.execute(query, (course_id,))
-    return db.fetchone()
+    result = db.fetchone()
+    result_fomatted = {
+        'course_id':result[0],
+        'title':result[1],
+        'industry':result[2],
+        'description':result[3],
+        'company_id':result[4],
+        'created_at':result[5],
+        'updated_at':result[6],
+        'lesson_count':result[7],
+        'assessment_count':result[8],
+        'feedback_count':result[9]
+    }
+    return result_fomatted
 
 def update_course_service(course_id, data):
     # Start building the query
