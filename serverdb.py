@@ -765,19 +765,23 @@ async def create_course(req: Request):
             detail=f"An unexpected error occurred: {str(e)}"
         )
 
-@app.get("/backend/courses/{course_id}", status_code=status.HTTP_200_OK)
-def get_one_course(course_id: int):
+@app.get("/backend/courses", status_code=status.HTTP_200_OK)
+async def get_one_course(req:Request):
+    data = await req.json()
+    course_id = data['course_id']
     course = get_one_course_service(course_id)
     if not course:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
     return course
 
-@app.get("/backend/allCourses/{company_id}", status_code=status.HTTP_200_OK)
-def get_all_courses(
-    company_id: int ,
+@app.get("/backend/allCourses", status_code=status.HTTP_200_OK)
+async def get_all_courses(
+    req: Request ,
     date: str = Query(None, description="Filter by a specific date (format: YYYY-MM-DD)"),
     latest_added: bool = Query(None, description="Filter by the most recently added courses"),
 ):
+    data = await req.json()
+    company_id = data['company_id']
     try:
         courses = get_all_courses_service(company_id=company_id, date=date, latest_added=latest_added)
 
@@ -788,14 +792,17 @@ def get_all_courses(
     except Exception as e:
         return HTTPException(status_code=500, detail= str(e))
     
-@app.put("/backend/courses/{course_id}", status_code=status.HTTP_200_OK)
-async def update_courses(req: Request, course_id: int):
+@app.put("/backend/courses", status_code=status.HTTP_200_OK)
+async def update_courses(req: Request):
     data = await req.json()
+    course_id = data['course_id']
     update_course_service(course_id, data)
     return {"message": "Course updated successfully"}
 
-@app.delete("/backend/courses/{course_id}", status_code=status.HTTP_200_OK)
-def delete_courses(course_id: int):
+@app.delete("/backend/courses", status_code=status.HTTP_200_OK)
+async def delete_courses(req: Request):
+    data = await req.json()
+    course_id = data['course_id']
     delete_course_services(course_id)
     return {"message": "Course deleted successfully"}
 
@@ -841,16 +848,19 @@ async def create_lesson(req: Request,pdf_file: UploadFile = File(..., descriptio
             detail=f"An unexpected error occurred: {str(e)}"
         )
     
-@app.get("/backend/lessons/{course_id}",status_code=status.HTTP_200_OK)
-def get_lesson(course_id: int):
+@app.get("/backend/lessons",status_code=status.HTTP_200_OK)
+async def get_lesson(req: Request):
+    data = await req.json()
+    course_id = data['course_id']
     lesson = get_lessons_service(course_id)
     if not lesson:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lesson not found")
     return {"data": lesson}
 
-@app.put("/backend/lessons/{lesson_id}",status_code=status.HTTP_200_OK)
-def update_lesson(req: Request, lesson_id: int,pdf_file: UploadFile | None = File(None)):
+@app.put("/backend/lessons",status_code=status.HTTP_200_OK)
+def update_lesson(req: Request,pdf_file: UploadFile | None = File(None)):
     data = req.json()
+    lesson_id = data['lesson_id']
     pdf_name = None
     if pdf_file is not None:
             
@@ -876,8 +886,10 @@ def update_lesson(req: Request, lesson_id: int,pdf_file: UploadFile | None = Fil
     update_lesson(lesson_id, data,pdf_name)
     return {"message": "Lesson updated successfully"}
 
-@app.delete("/backend/lessons/{lesson_id}",status_code=status.HTTP_200_OK)
-def delete_lesson(lesson_id: int):
+@app.delete("/backend/lessons",status_code=status.HTTP_200_OK)
+async def delete_lesson(req: Request):
+    data = await req.json()
+    lesson_id = data['lesson_id']
     delete_lesson_service(lesson_id)
     return {"message": "Lesson deleted successfully"}
 
@@ -913,20 +925,23 @@ async def create_feedback(req: Request):
     feedback_id = create_feedback_service(data)
     return {"message": "Feedback created successfully", "feedback_id": feedback_id}
 
-@app.get("/backend/feedbacks/{feedback_id}",status_code=status.HTTP_200_OK)
-def get_feedback(feedback_id: int):
+@app.get("/backend/feedbacks",status_code=status.HTTP_200_OK)
+async def get_feedback(req: Request):
+    data = await req.json()
+    feedback_id = data['feedback_id']
     feedback = get_feedback_service(feedback_id)
     if not feedback:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback not found")
     return feedback
 
-@app.put("/backend/feedbacks/{feedback_id}",status_code=status.HTTP_200_OK)
-def update_feedback(req: Request, feedback_id: int):
+@app.put("/backend/feedbacks",status_code=status.HTTP_200_OK)
+def update_feedback(req: Request):
     data = req.json()
+    feedback_id = data['feedback_id']
     update_feedback_service(feedback_id, data)
     return {"message": "Feedback updated successfully"}
 
-@app.delete("/backend/feedbacks/{feedback_id}",status_code=status.HTTP_200_OK)
+@app.delete("/backend/feedbacks",status_code=status.HTTP_200_OK)
 def delete_feedback(feedback_id: int):
     delete_feedback_service(feedback_id)
     return {"message": "Feedback deleted successfully"}
