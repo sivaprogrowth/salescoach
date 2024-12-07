@@ -942,7 +942,9 @@ def update_feedback(req: Request):
     return {"message": "Feedback updated successfully"}
 
 @app.delete("/backend/feedbacks",status_code=status.HTTP_200_OK)
-def delete_feedback(feedback_id: int):
+def delete_feedback(req : Request):
+    data = req.json()
+    feedback_id = data['feedback_id']
     delete_feedback_service(feedback_id)
     return {"message": "Feedback deleted successfully"}
 
