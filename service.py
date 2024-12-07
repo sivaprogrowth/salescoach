@@ -124,54 +124,136 @@ def get_all_courses_service(company_id, date=None, latest_added=None):
 
     # Execute the query with parameterized values
     db.execute(query, tuple(values))
-    return db.fetchall()
+    courses = db.fetchall()
+
+    # Format the results similarly to the get_one_course API
+    formatted_courses = []
+    for course in courses:
+        formatted_courses.append({
+            "course_id": course["course_id"],
+            "title": course["title"],
+            "industry": course["industry"],
+            "description": course["description"],
+            "company_id": course["company_id"],
+            "created_at": course["created_at"],
+            "updated_at": course["updated_at"],
+            "lesson_count": course["lesson_count"],
+            "assessment_count": course["assessment_count"],
+            "feedback_count": course["feedback_count"]
+        })
+
+    return formatted_courses
 
 
 # CRUD functions for lessons
-def create_lesson(data):
+def create_lesson_service(data, pdf_name):
     query = """
     INSERT INTO lessons (course_id, title, role, topic, industry, convert_type, pdf, created_at, updated_at)
     VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
     """
     db.execute(query, (
         data['course_id'], data['title'], data.get('role'), data.get('topic'),
-        data.get('industry'), data.get('convert_type'), data.get('pdf')
+        data.get('industry'), data.get('convert_type'), pdf_name
     ))
-    db.connection.commit()
+    connection.commit()
     return db.lastrowid
 
-def get_lesson(lesson_id):
-    query = "SELECT * FROM lessons WHERE id = %s"
-    db.execute(query, (lesson_id,))
-    return db.fetchone()
 
-def update_lesson(lesson_id, data, db):
-    query = """
-    UPDATE lessons
-    SET course_id = %s, title = %s, role = %s, topic = %s, industry = %s, convert_type = %s, pdf = %s, updated_at = NOW()
-    WHERE id = %s
+def get_lessons_service(course_id):
     """
-    db.execute(query, (
-        data['course_id'], data['title'], data.get('role'), data.get('topic'),
-        data.get('industry'), data.get('convert_type'), data.get('pdf'), lesson_id
-    ))
-    db.connection.commit()
+    Fetch all lessons associated with a given course_id.
+    The result includes formatted created_at and updated_at timestamps.
+    """
+    # Query to fetch lessons for a specific course
+    query = """
+    SELECT 
+        l.id AS lesson_id,
+        l.title,
+        l.description,
+        l.created_at,
+        l.updated_at
+    FROM 
+        lessons l
+    WHERE 
+        l.course_id = %s
+    ORDER BY 
+        l.created_at ASC
+    """
 
-def delete_lesson(lesson_id):
+    # Execute the query with the course_id parameter
+    db.execute(query, (course_id,))
+    lessons = db.fetchall()
+
+    # Format the result
+    formatted_lessons = []
+    for lesson in lessons:
+        formatted_lessons.append({
+            "lesson_id": lesson["lesson_id"],
+            "title": lesson["title"],
+            "description": lesson["description"],
+            "created_at": lesson["created_at"].strftime("%d %b %Y"),  # Format date as 15 Dec 2001
+            "updated_at": lesson["updated_at"].strftime("%d %b %Y")   # Format date as 15 Dec 2001
+        })
+
+    return formatted_lessons
+
+def update_lesson_service(lesson_id, data, pdf_Name=None):
+    """
+    Update the specified fields of a lesson by lesson_id.
+    """
+    # Start building the query
+    query = "UPDATE lessons SET "
+    updates = []
+    values = []
+
+    if "title" in data:
+        updates.append("title = %s")
+        values.append(data["title"])
+    if "role" in data:
+        updates.append("role = %s")
+        values.append(data["role"])
+    if "topic" in data:
+        updates.append("topic = %s")
+        values.append(data["topic"])
+    if "industry" in data:
+        updates.append("industry = %s")
+        values.append(data["industry"])
+    if "convert_type" in data:
+        updates.append("convert_type = %s")
+        values.append(data["convert_type"])
+    if pdf_Name is not None:  # Handle PDF updates if included
+        updates.append("pdf = %s")
+        values.append(data["pdf"])
+
+    # Add the updated_at field
+    updates.append("updated_at = NOW()")
+
+    # Combine updates into the query
+    query += ", ".join(updates)
+    query += " WHERE id = %s"
+    values.append(lesson_id)
+
+    # Execute the query
+    db.execute(query, tuple(values))
+    connection.commit()
+
+def delete_lesson_service(lesson_id):
+    prev_idx = get_lesson_PDF(lesson_id)
+    delete_index(prev_idx)
     query = "DELETE FROM lessons WHERE id = %s"
     db.execute(query, (lesson_id,))
     db.connection.commit()
 
 # CRUD functions for assessments
-def create_assessment(data):
+def create_assessment_service(data):
     query = """
-    INSERT INTO assessments (course_id, title, objective, number_of_questions, created_at, updated_at)
+    INSERT INTO assessments (lesson_id, title, objective, number_of_questions, created_at, updated_at)
     VALUES (%s, %s, %s, %s, NOW(), NOW())
     """
     db.execute(query, (
         data['course_id'], data['title'], data.get('objective'), data.get('number_of_questions')
     ))
-    db.connection.commit()
+    connection.commit()
     return db.lastrowid
 
 def get_assessment(assessment_id):
@@ -197,7 +279,7 @@ def delete_assessment(assessment_id):
     db.connection.commit()
 
 # CRUD functions for feedbacks
-def create_feedback(data):
+def create_feedback_service(data):
     query = """
     INSERT INTO feedbacks (course_id, feedback_question, created_at, updated_at)
     VALUES (%s, %s, NOW(), NOW())
@@ -206,21 +288,79 @@ def create_feedback(data):
     db.connection.commit()
     return db.lastrowid
 
-def get_feedback(feedback_id):
+def get_feedback_service(feedback_id):
     query = "SELECT * FROM feedbacks WHERE id = %s"
     db.execute(query, (feedback_id,))
-    return db.fetchone()
+    feedback = db.fetchall()
 
-def update_feedback(feedback_id, data):
-    query = """
-    UPDATE feedbacks
-    SET course_id = %s, feedback_question = %s, updated_at = NOW()
-    WHERE id = %s
+    feedback={
+        "feedback": feedback["feedback_question"],
+        "created_at": feedback["created_at"]
+    }
+
+    return feedback
+
+def get_all_feedback(course_id):
     """
-    db.execute(query, (data['course_id'], data.get('feedback_question'), feedback_id))
-    db.connection.commit()
+    Fetch courses filtered by company_id with optional date and latest_added filters.
+    """
+    # Base query
+    query = "SELECT * FROM feedback WHERE course_id = %s"
+    values = [course_id]  # Initial value for the company_id filter
 
-def delete_feedback(feedback_id):
+    # Execute the query with parameterized values
+    db.execute(query, tuple(values))
+    feedbacks = db.fetchall()
+
+    # Format the results similarly to the get_one_course API
+    formatted_feedbacks = []
+    for feedback in feedbacks:
+        formatted_feedbacks.append({
+            "feedback": feedback["feedback_question"],
+            "created_at": feedback["created_at"]
+        })
+
+    return formatted_feedbacks
+
+def update_feedback_service(feedback_id, data):
+    """
+    Update the feedback record dynamically based on provided data.
+    Only updates the fields that are present in the data dictionary.
+    """
+    # Start building the query
+    query = "UPDATE feedbacks SET "
+    updates = []
+    values = []
+
+    # Add fields to be updated dynamically
+    if "course_id" in data:
+        updates.append("course_id = %s")
+        values.append(data["course_id"])
+    if "feedback_question" in data:
+        updates.append("feedback_question = %s")
+        values.append(data["feedback_question"])
+
+    # Ensure at least one field is provided for update
+    if not updates:
+        raise ValueError("No valid fields provided for update")
+
+    # Add updated_at field to the query
+    updates.append("updated_at = NOW()")
+
+    # Complete the query with WHERE clause
+    query += ", ".join(updates) + " WHERE id = %s"
+    values.append(feedback_id)
+
+    # Execute the query
+    db.execute(query, tuple(values))
+    connection.commit()
+
+def delete_feedback_service(feedback_id):
     query = "DELETE FROM feedbacks WHERE id = %s"
     db.execute(query, (feedback_id,))
-    db.connection.commit()
+    connection.commit()
+
+def get_lesson_PDF(lesson_id):
+    query = "SELECT pdf_path FROM lessons WHERE id = %s"
+    db.execute(query, (lesson_id,))
+    return db.fetchone()

@@ -225,3 +225,6 @@ def convert_pdf_to_txt_file(path):
     device.close()
     retstr.close()
     return t 
+
+def delete_index(index):
+    pc.delete_index(index)

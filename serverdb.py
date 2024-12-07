@@ -801,35 +801,92 @@ def delete_courses(course_id: int):
 
 # Lessons APIs
 @app.post("/backend/lessons",status_code=status.HTTP_201_CREATED)
-def create_lesson(req: Request):
-    data = req.json()
-    lesson_id = create_lesson(data)
-    return {"message": "Lesson created successfully", "lesson_id": lesson_id}
+async def create_lesson(req: Request,pdf_file: UploadFile = File(..., description="PDF file associated with the lesson")):
+    try:
+        data = await req.json()
+        if pdf_file is not None:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
+                temp_file_name = temp_file.name
+                shutil.copyfileobj(pdf_file.file, temp_file)
+            
+            try:
+                # Open the temporary file in binary read mode and pass the file object
+                with open(temp_file_name, "rb") as pdf_file:
+                    text = convert_pdf_to_txt_file(pdf_file)
+                
+                # Upload the extracted text to Pinecone
+                upload_file_to_pinecone(text, pdf_file.file_name, pdf_file.file_name)
+            finally:
+                os.remove(temp_file_name)
 
-@app.get("/backend/lessons/{lesson_id}",status_code=status.HTTP_200_OK)
-def get_lesson(lesson_id: int):
-    lesson = get_lesson(lesson_id)
+        lesson_id = create_lesson(data,pdf_file.filename)
+        # Validation checks for required fields
+        required_fields = ["title", "course_id", "content"]
+        missing_fields = [field for field in required_fields if field not in data or not data[field]]
+
+        if missing_fields:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Missing required fields: {', '.join(missing_fields)}"
+            )
+
+        # If validation passes, proceed to create the lesson
+        lesson_id = create_lesson_service(data)
+        return {"message": "Lesson created successfully", "lesson_id": lesson_id}
+
+    except Exception as e:
+        # Catch-all for any unexpected exceptions
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred: {str(e)}"
+        )
+    
+@app.get("/backend/lessons/{course_id}",status_code=status.HTTP_200_OK)
+def get_lesson(course_id: int):
+    lesson = get_lessons_service(course_id)
     if not lesson:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lesson not found")
     return {"data": lesson}
 
 @app.put("/backend/lessons/{lesson_id}",status_code=status.HTTP_200_OK)
-def update_lesson(req: Request, lesson_id: int):
+def update_lesson(req: Request, lesson_id: int,pdf_file: UploadFile | None = File(None)):
     data = req.json()
-    update_lesson(lesson_id, data)
+    pdf_name = None
+    if pdf_file is not None:
+            
+            #Deleting previous PDF
+            prev_PDF = get_lesson_PDF(lesson_id)
+            delete_index(prev_PDF)
+
+            pdf_name = pdf_file.filename
+            #Updating new pdf
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
+                temp_file_name = temp_file.name
+                shutil.copyfileobj(pdf_file.file, temp_file)
+            
+            try:
+                # Open the temporary file in binary read mode and pass the file object
+                with open(temp_file_name, "rb") as pdf_file:
+                    text = convert_pdf_to_txt_file(pdf_file)
+                
+                # Upload the extracted text to Pinecone
+                upload_file_to_pinecone(text, pdf_file.file_name, pdf_file.file_name)
+            finally:
+                os.remove(temp_file_name)
+    update_lesson(lesson_id, data,pdf_name)
     return {"message": "Lesson updated successfully"}
 
 @app.delete("/backend/lessons/{lesson_id}",status_code=status.HTTP_200_OK)
 def delete_lesson(lesson_id: int):
-    delete_lesson(lesson_id)
+    delete_lesson_service(lesson_id)
     return {"message": "Lesson deleted successfully"}
 
 # Assessments APIs
-@app.post("/backend/assessments")
+@app.post("/backend/assessments",status_code=status.HTTP_201_CREATED)
 def create_assessment(req: Request):
     data = req.json()
     assessment_id = create_assessment(data)
-    return {"status_code": status.HTTP_201_CREATED, "message": "Assessment created successfully", "assessment_id": assessment_id}
+    return {"message": "Assessment created successfully", "assessment_id": assessment_id}
 
 @app.get("/backend/assessments/{assessment_id}")
 def get_assessment(assessment_id: int):
@@ -850,29 +907,29 @@ def delete_assessment(assessment_id: int):
     return {"status_code": status.HTTP_200_OK, "message": "Assessment deleted successfully"}
 
 # Feedback APIs
-@app.post("/backend/feedbacks")
-def create_feedback(req: Request):
-    data = req.json()
-    feedback_id = create_feedback(data)
-    return {"status_code": status.HTTP_201_CREATED, "message": "Feedback created successfully", "feedback_id": feedback_id}
+@app.post("/backend/feedbacks",status_code=status.HTTP_201_CREATED)
+async def create_feedback(req: Request):
+    data = await req.json()
+    feedback_id = create_feedback_service(data)
+    return {"message": "Feedback created successfully", "feedback_id": feedback_id}
 
-@app.get("/backend/feedbacks/{feedback_id}")
+@app.get("/backend/feedbacks/{feedback_id}",status_code=status.HTTP_200_OK)
 def get_feedback(feedback_id: int):
-    feedback = get_feedback(feedback_id)
+    feedback = get_feedback_service(feedback_id)
     if not feedback:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Feedback not found")
-    return {"status_code": status.HTTP_200_OK, "data": feedback}
+    return feedback
 
-@app.put("/backend/feedbacks/{feedback_id}")
+@app.put("/backend/feedbacks/{feedback_id}",status_code=status.HTTP_200_OK)
 def update_feedback(req: Request, feedback_id: int):
     data = req.json()
-    update_feedback(feedback_id, data)
-    return {"status_code": status.HTTP_200_OK, "message": "Feedback updated successfully"}
+    update_feedback_service(feedback_id, data)
+    return {"message": "Feedback updated successfully"}
 
-@app.delete("/backend/feedbacks/{feedback_id}")
+@app.delete("/backend/feedbacks/{feedback_id}",status_code=status.HTTP_200_OK)
 def delete_feedback(feedback_id: int):
-    delete_feedback(feedback_id)
-    return {"status_code": status.HTTP_200_OK, "message": "Feedback deleted successfully"}
+    delete_feedback_service(feedback_id)
+    return {"message": "Feedback deleted successfully"}
 
 if __name__ == "__main__":
     import uvicorn
