@@ -104,32 +104,51 @@ def get_all_courses_service(company_id, date=None, latest_added=None):
     """
     Fetch courses filtered by company_id with optional date and latest_added filters.
     """
-    # Base query
-    query = "SELECT * FROM courses WHERE company_id = %s"
-    filters = []
-    values = [company_id]  # Initial value for the company_id filter
+    # Base query with JOINs for counts
+    query = """
+        SELECT 
+            c.id AS course_id,
+            c.title,
+            c.industry,
+            c.description,
+            c.company_id,
+            c.created_at,
+            c.updated_at,
+            COALESCE(COUNT(DISTINCT l.id), 0) AS lesson_count,
+            COALESCE(COUNT(DISTINCT a.id), 0) AS assessment_count,
+            COALESCE(COUNT(DISTINCT f.id), 0) AS feedback_count
+        FROM 
+            courses c
+        LEFT JOIN lessons l ON c.id = l.course_id
+        LEFT JOIN assessments a ON c.id = a.course_id
+        LEFT JOIN feedbacks f ON c.id = f.course_id
+        WHERE c.company_id = %s
+    """
 
-    # Apply date filter if provided
+    # Filtering and ordering logic
+    filters = []
+    values = [company_id]
+
     if date:
-        filters.append("created_at::date = %s")
+        filters.append("c.created_at::date = %s")
         values.append(date)
 
-    # Add ordering for the latest added filter
-    if latest_added:
-        query += " ORDER BY created_at DESC"
-
-    # Append additional filters to the WHERE clause
     if filters:
         query += " AND " + " AND ".join(filters)
+
+    if latest_added:
+        query += " ORDER BY c.created_at DESC"
+
+    # Grouping to ensure counts work correctly
+    query += " GROUP BY c.id"
 
     # Execute the query with parameterized values
     db.execute(query, tuple(values))
     courses = db.fetchall()
-    print("i am here too")
-    # Format the results similarly to the get_one_course API
-    formatted_courses = []
-    for course in courses:
-        formatted_courses.append({
+
+    # Format the result like get_one_course_service
+    formatted_courses = [
+        {
             "course_id": course[0],
             "title": course[1],
             "industry": course[2],
@@ -140,7 +159,9 @@ def get_all_courses_service(company_id, date=None, latest_added=None):
             "lesson_count": course[7],
             "assessment_count": course[8],
             "feedback_count": course[9]
-        })
+        }
+        for course in courses
+    ]
 
     return formatted_courses
 
