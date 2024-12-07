@@ -767,6 +767,7 @@ async def create_course(req: Request):
 
 @app.post("/backend/getCourses", status_code=status.HTTP_200_OK)
 async def get_one_course(req:Request):
+    print("i am here")
     data = await req.json()
     course_id = data['course_id']
     course = get_one_course_service(course_id)
@@ -782,6 +783,8 @@ async def get_all_courses(
 ):
     data = await req.json()
     company_id = data['company_id']
+    print("i am here")
+    print(company_id)
     try:
         courses = get_all_courses_service(company_id=company_id, date=date, latest_added=latest_added)
 

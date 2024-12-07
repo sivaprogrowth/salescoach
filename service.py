@@ -125,21 +125,21 @@ def get_all_courses_service(company_id, date=None, latest_added=None):
     # Execute the query with parameterized values
     db.execute(query, tuple(values))
     courses = db.fetchall()
-
+    print("i am here too")
     # Format the results similarly to the get_one_course API
     formatted_courses = []
     for course in courses:
         formatted_courses.append({
-            "course_id": course["course_id"],
-            "title": course["title"],
-            "industry": course["industry"],
-            "description": course["description"],
-            "company_id": course["company_id"],
-            "created_at": course["created_at"],
-            "updated_at": course["updated_at"],
-            "lesson_count": course["lesson_count"],
-            "assessment_count": course["assessment_count"],
-            "feedback_count": course["feedback_count"]
+            "course_id": course[0],
+            "title": course[1],
+            "industry": course[2],
+            "description": course[3],
+            "company_id": course[4],
+            "created_at": course[5],
+            "updated_at": course[6],
+            "lesson_count": course[7],
+            "assessment_count": course[8],
+            "feedback_count": course[9]
         })
 
     return formatted_courses
