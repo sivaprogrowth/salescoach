@@ -765,7 +765,7 @@ async def create_course(req: Request):
             detail=f"An unexpected error occurred: {str(e)}"
         )
 
-@app.get("/backend/courses", status_code=status.HTTP_200_OK)
+@app.post("/backend/getCourses", status_code=status.HTTP_200_OK)
 async def get_one_course(req:Request):
     data = await req.json()
     course_id = data['course_id']
@@ -774,7 +774,7 @@ async def get_one_course(req:Request):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Course not found")
     return course
 
-@app.get("/backend/allCourses", status_code=status.HTTP_200_OK)
+@app.post("/backend/allCourses", status_code=status.HTTP_200_OK)
 async def get_all_courses(
     req: Request ,
     date: str = Query(None, description="Filter by a specific date (format: YYYY-MM-DD)"),
@@ -848,7 +848,7 @@ async def create_lesson(req: Request,pdf_file: UploadFile = File(..., descriptio
             detail=f"An unexpected error occurred: {str(e)}"
         )
     
-@app.get("/backend/lessons",status_code=status.HTTP_200_OK)
+@app.post("/backend/getLessons",status_code=status.HTTP_200_OK)
 async def get_lesson(req: Request):
     data = await req.json()
     course_id = data['course_id']
@@ -900,7 +900,7 @@ def create_assessment(req: Request):
     assessment_id = create_assessment(data)
     return {"message": "Assessment created successfully", "assessment_id": assessment_id}
 
-@app.get("/backend/assessments/{assessment_id}")
+@app.post("/backend/assessments/{assessment_id}")
 def get_assessment(assessment_id: int):
     assessment = get_assessment(assessment_id)
     if not assessment:
@@ -925,7 +925,7 @@ async def create_feedback(req: Request):
     feedback_id = create_feedback_service(data)
     return {"message": "Feedback created successfully", "feedback_id": feedback_id}
 
-@app.get("/backend/feedbacks",status_code=status.HTTP_200_OK)
+@app.post("/backend/getFeedbacks",status_code=status.HTTP_200_OK)
 async def get_feedback(req: Request):
     data = await req.json()
     feedback_id = data['feedback_id']
