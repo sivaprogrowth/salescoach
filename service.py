@@ -209,11 +209,11 @@ def get_lessons_service(course_id):
     formatted_lessons = []
     for lesson in lessons:
         formatted_lessons.append({
-            "lesson_id": lesson["lesson_id"],
-            "title": lesson["title"],
-            "description": lesson["description"],
-            "created_at": lesson["created_at"].strftime("%d %b %Y"),  # Format date as 15 Dec 2001
-            "updated_at": lesson["updated_at"].strftime("%d %b %Y")   # Format date as 15 Dec 2001
+            "lesson_id": lesson[0],
+            "title": lesson[1],
+            "description": lesson[2],
+            "created_at": lesson[3].strftime("%d %b %Y"),  # Format date as 15 Dec 2001
+            "updated_at": lesson[4].strftime("%d %b %Y")   # Format date as 15 Dec 2001
         })
 
     return formatted_lessons
