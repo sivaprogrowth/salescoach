@@ -802,7 +802,7 @@ async def update_courses(req: Request):
     update_course_service(course_id, data)
     return {"message": "Course updated successfully"}
 
-@app.post("/backend/daleteCourses", status_code=status.HTTP_200_OK)
+@app.post("/backend/deleteCourses", status_code=status.HTTP_200_OK)
 async def delete_courses(req: Request):
     data = await req.json()
     course_id = data['course_id']
