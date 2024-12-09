@@ -795,7 +795,7 @@ async def get_all_courses(
     except Exception as e:
         return HTTPException(status_code=500, detail= str(e))
     
-@app.put("/backend/courses", status_code=status.HTTP_200_OK)
+@app.post("/backend/updateCourses", status_code=status.HTTP_200_OK)
 async def update_courses(req: Request):
     data = await req.json()
     course_id = data['course_id']
