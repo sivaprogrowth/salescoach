@@ -6,9 +6,11 @@ load_dotenv()
 
 DATABASE = os.getenv('DATABASE')
 PASSWD = os.getenv('PASSWD')
+USER = os.getenv('DB_USER')
+HOST = os.getenv('HOST')
 connection = mysql.connector.connect(
-    user = 'admin',
-    host = 'salescoachdatabase-1.ctkqiaw8wxwq.ap-south-1.rds.amazonaws.com',
+    user = USER,
+    host = HOST,
     database = DATABASE,
     passwd = PASSWD
 )
@@ -167,14 +169,14 @@ def get_all_courses_service(company_id, date=None, latest_added=None):
 
 
 # CRUD functions for lessons
-def create_lesson_service(data, pdf_name):
+def create_lesson_service(data):
     query = """
     INSERT INTO lessons (course_id, title, role, topic, industry, convert_type, pdf, created_at, updated_at)
     VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
     """
     db.execute(query, (
         data['course_id'], data['title'], data.get('role'), data.get('topic'),
-        data.get('industry'), data.get('convert_type'), pdf_name
+        data.get('industry'), data.get('convert_type'), data.get('pdf_name')
     ))
     connection.commit()
     return db.lastrowid
@@ -190,7 +192,6 @@ def get_lessons_service(course_id):
     SELECT 
         l.id AS lesson_id,
         l.title,
-        l.description,
         l.created_at,
         l.updated_at
     FROM 
@@ -211,9 +212,8 @@ def get_lessons_service(course_id):
         formatted_lessons.append({
             "lesson_id": lesson[0],
             "title": lesson[1],
-            "description": lesson[2],
-            "created_at": lesson[3].strftime("%d %b %Y"),  # Format date as 15 Dec 2001
-            "updated_at": lesson[4].strftime("%d %b %Y")   # Format date as 15 Dec 2001
+            "created_at": lesson[2].strftime("%d %b %Y"),  # Format date as 15 Dec 2001
+            "updated_at": lesson[3].strftime("%d %b %Y")   # Format date as 15 Dec 2001
         })
 
     return formatted_lessons
@@ -260,6 +260,7 @@ def update_lesson_service(lesson_id, data, pdf_Name=None):
 
 def delete_lesson_service(lesson_id):
     prev_idx = get_lesson_PDF(lesson_id)
+    print(prev_idx)
     delete_index(prev_idx)
     query = "DELETE FROM lessons WHERE id = %s"
     db.execute(query, (lesson_id,))
@@ -382,6 +383,6 @@ def delete_feedback_service(feedback_id):
     connection.commit()
 
 def get_lesson_PDF(lesson_id):
-    query = "SELECT pdf_path FROM lessons WHERE id = %s"
+    query = "SELECT pdf FROM lessons WHERE id = %s"
     db.execute(query, (lesson_id,))
     return db.fetchone()

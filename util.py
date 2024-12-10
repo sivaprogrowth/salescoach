@@ -35,17 +35,18 @@ embeddings = OpenAIEmbeddings()
 def get_index_list():
     return pc.list_indexes()
 
-def index_init(name: str, dims: int):
-    if name in get_index_list().names():
-        return
-    pc.create_index(
-        name=name,
-        dimension=dims,
-        spec=ServerlessSpec(cloud='aws', region='us-west-2')
-    )
+def index_init(name: str, dims: int=1536):
+    if name not in get_index_list().names():
+        pc.create_index(
+            name=name,
+            dimension=dims,
+            spec=ServerlessSpec(cloud='aws', region='us-west-2')
+        )
+    return get_index(name)
     
 def get_index(index_name: str):
-    return pc.Index(index_name)
+    idx = pc.Index(host=index_name)
+    return idx
 
 def get_all_docs(index_name: str):
     index = get_index(index_name)
@@ -124,7 +125,7 @@ def upload_file_to_pinecone(raw_text, file_name, index_name):
         )
         
         texts = text_splitter.split_text(raw_text)
-        index = get_index(index_name)
+        index = index_init(index_name)
         embeddings = OpenAIEmbeddings()
         batch_size = max(len(texts) // 10, 1)
 

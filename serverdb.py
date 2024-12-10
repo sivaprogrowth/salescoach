@@ -19,6 +19,8 @@ import queue
 import requests
 import mimetypes
 import io
+from io import BytesIO
+from typing import Optional
 import re
 import boto3
 import tempfile
@@ -27,9 +29,11 @@ load_dotenv()
 
 DATABASE = os.getenv('DATABASE')
 PASSWD = os.getenv('PASSWD')
+USER = os.getenv('DB_USER')
+HOST = os.getenv('HOST')
 connection = mysql.connector.connect(
-    user = 'admin',
-    host = 'salescoachdatabase-1.ctkqiaw8wxwq.ap-south-1.rds.amazonaws.com',
+    user = USER,
+    host = HOST,
     database = DATABASE,
     passwd = PASSWD
 )
@@ -274,7 +278,12 @@ async def run_script(message: str, idx : str) -> str:
         print('Pinecone query completed')
         
         # Prepare prompt for OpenAI completion
-        prompt = f"Based on the following data:\n{pinecone_result}\nGenerate a response to the query message {message}."
+        prompt = f"""Act as a guide for people with strong coaching and career counselling credentials and 
+                    who has lot of experience of guiding young employees and candidates in India.
+                    Based on the following data:\n{pinecone_result}\nGenerate a response to the query message {message}. If you dont know the answer, give them a message “Currently I dont know the response but please reach me on https://www.yogyabano.com/contact-us to get specific response for your query”.Be specific and provide your responses in 5- 8 bullet points. Well formatted and with relevant examples, wherever required.
+                    In the end of every response, please give them a relevant sentence that prompts them to ask more questions.."""
+        
+        # prompt = f"Based on the following data:\n{pinecone_result}\nGenerate a response to the query message {message}."
         
         # Get response from OpenAI's completion model
         completion = client.chat.completions.create(
@@ -810,42 +819,41 @@ async def delete_courses(req: Request):
     return {"message": "Course deleted successfully"}
 
 # Lessons APIs
-@app.post("/backend/lessons",status_code=status.HTTP_201_CREATED)
-async def create_lesson(req: Request,pdf_file: UploadFile = File(..., description="PDF file associated with the lesson")):
+@app.post("/backend/lessons", status_code=status.HTTP_201_CREATED)
+async def create_lesson(
+    course_id: int = Form(...),
+    title: str = Form(...),
+    role: str = Form(None),
+    topic: str = Form(None),
+    industry: str = Form(None),
+    convert_type: str = Form(None),
+    pdf_file: UploadFile = File(None, description="PDF file associated with the lesson")
+):
     try:
-        data = await req.json()
-        if pdf_file is not None:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
-                temp_file_name = temp_file.name
-                shutil.copyfileobj(pdf_file.file, temp_file)
-            
-            try:
-                # Open the temporary file in binary read mode and pass the file object
-                with open(temp_file_name, "rb") as pdf_file:
-                    text = convert_pdf_to_txt_file(pdf_file)
-                
-                # Upload the extracted text to Pinecone
-                upload_file_to_pinecone(text, pdf_file.file_name, pdf_file.file_name)
-            finally:
-                os.remove(temp_file_name)
+        pdf_file_name = (pdf_file.filename).split('.')[-2] if pdf_file else None
+        if pdf_file:
+            pdf_content = await pdf_file.read() 
+            pdf_stream = BytesIO(pdf_content)   
+            # Create a file-like stream
+            text = convert_pdf_to_txt_file(pdf_stream)
+            # Upload to Pinecone
+            upload_file_to_pinecone(text, pdf_file.filename, pdf_file_name)
 
-        lesson_id = create_lesson(data,pdf_file.filename)
-        # Validation checks for required fields
-        required_fields = ["title", "course_id", "content"]
-        missing_fields = [field for field in required_fields if field not in data or not data[field]]
-
-        if missing_fields:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Missing required fields: {', '.join(missing_fields)}"
-            )
-
-        # If validation passes, proceed to create the lesson
+        # Create lesson in database
+        data = {
+            "course_id": course_id,
+            "title": title,
+            "role": role,
+            "topic": topic,
+            "industry": industry,
+            "convert_type": convert_type,
+            "pdf_name":pdf_file_name
+        }
         lesson_id = create_lesson_service(data)
+
         return {"message": "Lesson created successfully", "lesson_id": lesson_id}
 
     except Exception as e:
-        # Catch-all for any unexpected exceptions
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An unexpected error occurred: {str(e)}"
@@ -861,35 +869,43 @@ async def get_lesson(req: Request):
     return {"data": lesson}
 
 @app.put("/backend/lessons",status_code=status.HTTP_200_OK)
-def update_lesson(req: Request,pdf_file: UploadFile | None = File(None)):
-    data = req.json()
-    lesson_id = data['lesson_id']
-    pdf_name = None
-    if pdf_file is not None:
-            
-            #Deleting previous PDF
-            prev_PDF = get_lesson_PDF(lesson_id)
-            delete_index(prev_PDF)
+async def update_lesson(
+    lesson_id: Optional[int] = Form(None),
+    title: Optional[str] = Form(None),
+    role: Optional[str] = Form(None),
+    topic: Optional[str] = Form(None),
+    industry: Optional[str] = Form(None),
+    convert_type: Optional[str] = Form(None),
+    pdf_file: Optional[UploadFile] | None = File(None)):
 
-            pdf_name = pdf_file.filename
-            #Updating new pdf
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
-                temp_file_name = temp_file.name
-                shutil.copyfileobj(pdf_file.file, temp_file)
+    pdf_name = None
+    if pdf_file is not None:    
+        #Deleting previous PDF
+        prev_PDF = get_lesson_PDF(lesson_id)
+        delete_index(prev_PDF)
+
+        pdf_name = (pdf_file.filename).split('.')[-2] if pdf_file else None
+        if pdf_file:
+            pdf_content = await pdf_file.read() 
+            pdf_stream = BytesIO(pdf_content)   
+            # Create a file-like stream
+            text = convert_pdf_to_txt_file(pdf_stream)
+            # Upload to Pinecone
+            upload_file_to_pinecone(text, pdf_file.filename, pdf_name)
             
-            try:
-                # Open the temporary file in binary read mode and pass the file object
-                with open(temp_file_name, "rb") as pdf_file:
-                    text = convert_pdf_to_txt_file(pdf_file)
-                
-                # Upload the extracted text to Pinecone
-                upload_file_to_pinecone(text, pdf_file.file_name, pdf_file.file_name)
-            finally:
-                os.remove(temp_file_name)
-    update_lesson(lesson_id, data,pdf_name)
+    # Filter only fields that are not None
+    data = {k: v for k, v in {
+        "title": title,
+        "role": role,
+        "topic": topic,
+        "industry": industry,
+        "convert_type": convert_type
+    }.items() if v is not None}
+
+    update_lesson_service(lesson_id, data,pdf_name)
     return {"message": "Lesson updated successfully"}
 
-@app.delete("/backend/lessons",status_code=status.HTTP_200_OK)
+@app.post("/backend/deleteLessons",status_code=status.HTTP_200_OK)
 async def delete_lesson(req: Request):
     data = await req.json()
     lesson_id = data['lesson_id']
