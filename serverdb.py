@@ -859,14 +859,14 @@ async def create_lesson(
             detail=f"An unexpected error occurred: {str(e)}"
         )
     
-@app.post("/backend/getLessons",status_code=status.HTTP_200_OK)
+@app.post("/backend/allLessons",status_code=status.HTTP_200_OK)
 async def get_lesson(req: Request):
     data = await req.json()
     course_id = data['course_id']
     lesson = get_lessons_service(course_id)
     if not lesson:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lesson not found")
-    return {"data": lesson}
+    return lesson
 
 @app.put("/backend/lessons",status_code=status.HTTP_200_OK)
 async def update_lesson(
@@ -916,25 +916,27 @@ async def delete_lesson(req: Request):
 @app.post("/backend/assessments",status_code=status.HTTP_201_CREATED)
 def create_assessment(req: Request):
     data = req.json()
-    assessment_id = create_assessment(data)
+    assessment_id = create_assessment_service(data)
     return {"message": "Assessment created successfully", "assessment_id": assessment_id}
 
 @app.post("/backend/assessments/{assessment_id}")
-def get_assessment(assessment_id: int):
-    assessment = get_assessment(assessment_id)
+async def get_assessment(req: Request):
+    data = await req.json()
+    assessment = get_assessment_service(data["assessment_id"])
     if not assessment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assessment not found")
     return {"status_code": status.HTTP_200_OK, "data": assessment}
 
-@app.put("/backend/assessments/{assessment_id}")
-def update_assessment(req: Request, assessment_id: int):
-    data = req.json()
-    update_assessment(assessment_id, data)
+@app.put("/backend/assessments")
+async def update_assessment(req: Request):
+    data = await req.json()
+    update_assessment_service(data["assessment_id"], data)
     return {"status_code": status.HTTP_200_OK, "message": "Assessment updated successfully"}
 
-@app.delete("/backend/assessments/{assessment_id}")
-def delete_assessment(assessment_id: int):
-    delete_assessment(assessment_id)
+@app.post("/backend/deleteAssessments")
+async def delete_assessment(req: Request):
+    data = await req.json()
+    delete_assessment_service(data["assessment_id"])
     return {"status_code": status.HTTP_200_OK, "message": "Assessment deleted successfully"}
 
 # Feedback APIs
@@ -954,17 +956,30 @@ async def get_feedback(req: Request):
     return feedback
 
 @app.put("/backend/feedbacks",status_code=status.HTTP_200_OK)
-def update_feedback(req: Request):
-    data = req.json()
+async def update_feedback(req: Request):
+    data = await req.json()
     feedback_id = data['feedback_id']
     update_feedback_service(feedback_id, data)
     return {"message": "Feedback updated successfully"}
 
-@app.delete("/backend/feedbacks",status_code=status.HTTP_200_OK)
-def delete_feedback(req : Request):
-    data = req.json()
+@app.post("/backend/deleteFeedbacks",status_code=status.HTTP_200_OK)
+async def delete_feedback(req : Request):
+    data = await req.json()
     feedback_id = data['feedback_id']
     delete_feedback_service(feedback_id)
+    return {"message": "Feedback deleted successfully"}
+
+@app.post("/backend/allFeedbacks",status_code=status.HTTP_200_OK)
+async def get_all_feedback(req : Request):
+    data = await req.json()
+    course_id = data['course_id']
+    feedbacks = get_all_feedback(course_id)
+    return feedbacks
+
+@app.post("/backend/createMCQ",status_code=status.HTTP_200_OK)
+async def create_MCQ(req : Request):
+    data = await req.json()
+    create_MCQ_service(data)
     return {"message": "Feedback deleted successfully"}
 
 if __name__ == "__main__":

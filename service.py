@@ -259,12 +259,12 @@ def update_lesson_service(lesson_id, data, pdf_Name=None):
     connection.commit()
 
 def delete_lesson_service(lesson_id):
-    prev_idx = get_lesson_PDF(lesson_id)
+    prev_idx = get_lesson_PDF(lesson_id)[0]
     print(prev_idx)
     delete_index(prev_idx)
     query = "DELETE FROM lessons WHERE id = %s"
     db.execute(query, (lesson_id,))
-    db.connection.commit()
+    connection.commit()
 
 # CRUD functions for assessments
 def create_assessment_service(data):
@@ -278,12 +278,12 @@ def create_assessment_service(data):
     connection.commit()
     return db.lastrowid
 
-def get_assessment(assessment_id):
+def get_assessment_service(assessment_id):
     query = "SELECT * FROM assessments WHERE id = %s"
     db.execute(query, (assessment_id,))
     return db.fetchone()
 
-def update_assessment(assessment_id, data):
+def update_assessment_service(assessment_id, data):
     query = """
     UPDATE assessments
     SET course_id = %s, title = %s, objective = %s, number_of_questions = %s, updated_at = NOW()
@@ -295,7 +295,7 @@ def update_assessment(assessment_id, data):
     ))
     db.connection.commit()
 
-def delete_assessment(assessment_id):
+def delete_assessment_service(assessment_id):
     query = "DELETE FROM assessments WHERE id = %s"
     db.execute(query, (assessment_id,))
     db.connection.commit()
@@ -307,17 +307,17 @@ def create_feedback_service(data):
     VALUES (%s, %s, NOW(), NOW())
     """
     db.execute(query, (data['course_id'], data.get('feedback_question')))
-    db.connection.commit()
+    connection.commit()
     return db.lastrowid
 
 def get_feedback_service(feedback_id):
     query = "SELECT * FROM feedbacks WHERE id = %s"
     db.execute(query, (feedback_id,))
-    feedback = db.fetchall()
-
+    feedback = db.fetchone()
+    print(feedback)
     feedback={
-        "feedback": feedback["feedback_question"],
-        "created_at": feedback["created_at"]
+        "feedback": feedback[2],
+        "created_at": feedback[3].strftime("%d %b %Y")
     }
 
     return feedback
@@ -386,3 +386,23 @@ def get_lesson_PDF(lesson_id):
     query = "SELECT pdf FROM lessons WHERE id = %s"
     db.execute(query, (lesson_id,))
     return db.fetchone()
+
+def create_MCQ_service(data):
+    lesson_id = data['lesson_id']
+    title = data['title']
+    objective = data['objective']
+    no_of_questions = data['no_of_question']
+
+    query = "SELECT pdf FROM lessons WHERE id = %s"
+    db.execute(query, (lesson_id,))
+    idx = (db.fetchone())[0]
+    
+    questions , answers = generate_QNA(title , objective , no_of_questions , idx)
+
+    query = """
+    INSERT INTO MCQ (course_id, feedback_question, created_at, updated_at)
+    VALUES (%s, %s, NOW(), NOW())
+    """
+    db.execute(query, (data['course_id'], data.get('feedback_question')))
+    connection.commit()
+    return db.lastrowid
