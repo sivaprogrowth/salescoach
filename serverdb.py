@@ -833,9 +833,14 @@ async def create_lesson(req:Request):
             # Create a file-like stream
             text = convert_pdf_to_txt_file(BytesIO(pdf_stream))
             # Upload to Pinecone
+<<<<<<< Updated upstream
             pdf_file_name = file_name.split('.')[-2]
             upload_file_to_pinecone(text, file_name, pdf_file_name)
 
+=======
+            upload_file_to_pinecone(text, pdf_file.filename, pdf_file_name)
+            print("Upload Done")
+>>>>>>> Stashed changes
         # Create lesson in database
         lesson_id = create_lesson_service(data)
 
@@ -885,6 +890,7 @@ async def update_lesson(req: Request):
 async def delete_lesson(req: Request):
     data = await req.json()
     lesson_id = data['lesson_id']
+    print(lesson_id)
     delete_lesson_service(lesson_id)
     return {"message": "Lesson deleted successfully"}
 
