@@ -176,7 +176,7 @@ def create_lesson_service(data):
     """
     db.execute(query, (
         data['course_id'], data['title'], data.get('role'), data.get('topic'),
-        data.get('industry'), data.get('convert_type'), data.get('pdf_name')
+        data.get('industry'), data.get('convert_type'), data.get('file_name')
     ))
     connection.commit()
     return db.lastrowid
@@ -218,7 +218,7 @@ def get_lessons_service(course_id):
 
     return formatted_lessons
 
-def update_lesson_service(lesson_id, data, pdf_Name=None):
+def update_lesson_service(data):
     """
     Update the specified fields of a lesson by lesson_id.
     """
@@ -242,9 +242,9 @@ def update_lesson_service(lesson_id, data, pdf_Name=None):
     if "convert_type" in data:
         updates.append("convert_type = %s")
         values.append(data["convert_type"])
-    if pdf_Name is not None:  # Handle PDF updates if included
-        updates.append("pdf = %s")
-        values.append(data["pdf"])
+    if "file_name" in data:
+        updates.append("file_name = %s")
+        values.append(data["file_name"])
 
     # Add the updated_at field
     updates.append("updated_at = NOW()")
@@ -252,14 +252,14 @@ def update_lesson_service(lesson_id, data, pdf_Name=None):
     # Combine updates into the query
     query += ", ".join(updates)
     query += " WHERE id = %s"
-    values.append(lesson_id)
+    values.append(data["lesson_id"])
 
     # Execute the query
     db.execute(query, tuple(values))
     connection.commit()
 
 def delete_lesson_service(lesson_id):
-    prev_idx = get_lesson_PDF(lesson_id)[0]
+    prev_idx = get_lesson_PDF(lesson_id)[0].split('.')[-2]
     print(prev_idx)
     delete_index(prev_idx)
     query = "DELETE FROM lessons WHERE id = %s"
@@ -269,21 +269,84 @@ def delete_lesson_service(lesson_id):
 # CRUD functions for assessments
 def create_assessment_service(data):
     query = """
-    INSERT INTO assessments (lesson_id, title, objective, number_of_questions, created_at, updated_at)
-    VALUES (%s, %s, %s, %s, NOW(), NOW())
+    INSERT INTO assessments (lesson_id, title, objective, number_of_questions, mcq_id , created_at, updated_at)
+    VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
     """
     db.execute(query, (
-        data['course_id'], data['title'], data.get('objective'), data.get('number_of_questions')
+        data['course_id'], data['title'], data.get('objective'), data.get('number_of_questions'),data.get('mcq_id')
     ))
     connection.commit()
     return db.lastrowid
 
-def get_assessment_service(assessment_id):
-    query = "SELECT * FROM assessments WHERE id = %s"
-    db.execute(query, (assessment_id,))
-    return db.fetchone()
+def get_all_assessment_service(lesson_id):
+    """
+    Fetch all lessons associated with a given course_id.
+    The result includes formatted created_at and updated_at timestamps.
+    """
+    # Query to fetch lessons for a specific course
+    query = """
+    SELECT 
+        l.id AS assessment_id,
+        l.title,
+        l.created_at,
+        l.updated_at
+    FROM 
+        lessons l
+    WHERE 
+        l.course_id = %s
+    ORDER BY 
+        l.created_at ASC
+    """
 
-def update_assessment_service(assessment_id, data):
+    # Execute the query with the course_id parameter
+    db.execute(query, (lesson_id,))
+    lessons = db.fetchall()
+
+    # Format the result
+    formatted_lessons = []
+    for lesson in lessons:
+        formatted_lessons.append({
+            "assesment_id": lesson[0],
+            "title": lesson[1],
+            "created_at": lesson[2].strftime("%d %b %Y"),  # Format date as 15 Dec 2001
+            "updated_at": lesson[3].strftime("%d %b %Y")   # Format date as 15 Dec 2001
+        })
+
+    return formatted_lessons
+
+def update_assessment_service(assessment_id, data):  
+    """
+    Update the specified fields of a lesson by lesson_id.
+    """
+    # Start building the query
+    query = "UPDATE assessments SET "
+    updates = []
+    values = []
+
+    if "title" in data:
+        updates.append("title = %s")
+        values.append(data["title"])
+    if "objective" in data:
+        updates.append("objective = %s")
+        values.append(data["objective"])
+    if "number_of_questions" in data:
+        updates.append("number_of_questions = %s")
+        values.append(data["number_of_questions"])
+    if "MCQ_id" in data:
+        updates.append("MCQ_id = %s")
+        values.append(data["MCQ_id"])
+    
+    # Add the updated_at field
+    updates.append("updated_at = NOW()")
+
+    # Combine updates into the query
+    query += ", ".join(updates)
+    query += " WHERE id = %s"
+    values.append(assessment_id)
+
+    # Execute the query
+    db.execute(query, tuple(values))
+    connection.commit()
     query = """
     UPDATE assessments
     SET course_id = %s, title = %s, objective = %s, number_of_questions = %s, updated_at = NOW()
@@ -296,9 +359,12 @@ def update_assessment_service(assessment_id, data):
     db.connection.commit()
 
 def delete_assessment_service(assessment_id):
-    query = "DELETE FROM assessments WHERE id = %s"
+    prev_MCQ = get_lesson_PDF(assessment_id)[0]
+    delete_MCQ(prev_MCQ)
+    query = "DELETE FROM lessons WHERE id = %s"
     db.execute(query, (assessment_id,))
-    db.connection.commit()
+    connection.commit()
+
 
 # CRUD functions for feedbacks
 def create_feedback_service(data):
@@ -387,6 +453,11 @@ def get_lesson_PDF(lesson_id):
     db.execute(query, (lesson_id,))
     return db.fetchone()
 
+def get_MCQ(assessment_id):
+    query = "SELECT MCQ_id FROM assessments WHERE id = %s"
+    db.execute(query, (assessment_id,))
+    return db.fetchone()
+
 def create_MCQ_service(data):
     lesson_id = data['lesson_id']
     title = data['title']
@@ -396,13 +467,20 @@ def create_MCQ_service(data):
     query = "SELECT pdf FROM lessons WHERE id = %s"
     db.execute(query, (lesson_id,))
     idx = (db.fetchone())[0]
-    
+
     questions , answers = generate_QNA(title , objective , no_of_questions , idx)
 
     query = """
-    INSERT INTO MCQ (course_id, feedback_question, created_at, updated_at)
-    VALUES (%s, %s, NOW(), NOW())
+    INSERT INTO MCQ (question_count, questions, answers, created_at, updated_at)
+    VALUES (%s, %s, %s, NOW(), NOW())
     """
-    db.execute(query, (data['course_id'], data.get('feedback_question')))
+    
+    db.execute(query, (no_of_questions, json.dumps(questions), answers))
     connection.commit()
+  
     return db.lastrowid
+
+def delete_MCQ(MCQ_id):
+    query = "DELETE FROM MCQ WHERE id = %s"
+    db.execute(query, (MCQ_id,))
+    connection.commit()

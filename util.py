@@ -4,6 +4,7 @@ import cv2  # We're using OpenCV to read video, to install !pip install opencv-p
 import base64
 from dotenv import load_dotenv
 import os
+import json
 import wave
 from io import StringIO
 from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
@@ -229,3 +230,65 @@ def convert_pdf_to_txt_file(path):
 
 def delete_index(index):
     pc.delete_index(index)
+
+def generate_QNA(title , objective , no_of_questions , idx):
+    input  = title+"."+objective
+    docs = find_match(input, idx)
+
+    format = """
+            {
+                "quiz": [
+                    {
+                        "question": "Your question here",
+                        "options": "1) Option A, 2) Option B, 3) Option C"
+                    },
+                    {
+                        "question": "Another question here",
+                        "options": "1) Option X, 2) Option Y, 3) Option Z"
+                    }
+                ],
+                "answers": {
+                    "1",
+                    "3"
+                }
+            }
+            """
+    
+    # Prepare prompt for OpenAI completion
+    prompt = f"""You are an AI assessment generator. Use the provided title, objective, and retrieved data to create a multiple-choice quiz. Follow these instructions carefully:
+
+    Question Structure: Create clear, concise, and relevant multiple-choice questions based on the retrieved data. Ensure questions are directly related to the title and objective.
+    Answer Options: Provide three distinct answer options for each question, labeled 1), 2), and 3). Ensure only one answer is correct while the others are plausible distractors.
+    Answers Section: List the correct answers corresponding to the questions. Use only the correct answer option numbers (e.g., 1, 2, 3).
+    The number of questions generated will be {no_of_questions}.
+
+    Title:{title}
+    Objective:{objective}
+    retrieved data:{docs}
+    Output Format:{format}
+
+    follow the output format strictly . 
+    """
+        
+    # Get response from OpenAI's completion model
+    completion = client.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=150
+    )
+    print("OpenAI response received")
+    res = completion.choices[0].message.content
+
+    # Remove extra whitespace
+    cleaned_output = res.strip()
+    quiz_data = json.loads(cleaned_output.replace("'", '"'))
+    formatted_questions = [
+        {
+            "question": item["question"],
+            "options": item["options"]
+        }
+        for item in quiz_data['quiz']
+    ]
+    answers_str = json.dumps(list(quiz_data['answers']))
+    return formatted_questions , answers_str
+

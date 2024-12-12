@@ -50,6 +50,7 @@ GLIFIC_PASSWORD = os.getenv("GLIFIC_PASSWORD")
 GLIFIC_AUTH_URL = os.getenv("GLIFIC_AUTH_URL")
 GLIFIC_SEND_URL = os.getenv("GLIFIC_SEND_URL")
 pinecone_api_key = os.getenv("PINECONE_API_KEY")
+LESSON_BUCKET = os.getenv("LESSON_BUCKET")
 pinecone_database_name = os.getenv("PINECONE_DATABASE_NAME")
 
 
@@ -820,35 +821,22 @@ async def delete_courses(req: Request):
 
 # Lessons APIs
 @app.post("/backend/lessons", status_code=status.HTTP_201_CREATED)
-async def create_lesson(
-    course_id: int = Form(...),
-    title: str = Form(...),
-    role: str = Form(None),
-    topic: str = Form(None),
-    industry: str = Form(None),
-    convert_type: str = Form(None),
-    pdf_file: UploadFile = File(None, description="PDF file associated with the lesson")
-):
+async def create_lesson(req:Request):
     try:
-        pdf_file_name = (pdf_file.filename).split('.')[-2] if pdf_file else None
-        if pdf_file:
-            pdf_content = await pdf_file.read() 
-            pdf_stream = BytesIO(pdf_content)   
+        data = await req.json()
+        file_name = data["file_name"]
+        # Download file directly from S3
+        response = s3.get_object(Bucket=LESSON_BUCKET, Key=file_name)
+
+        if response:
+            pdf_stream = response['Body'].read()  
             # Create a file-like stream
-            text = convert_pdf_to_txt_file(pdf_stream)
+            text = convert_pdf_to_txt_file(BytesIO(pdf_stream))
             # Upload to Pinecone
-            upload_file_to_pinecone(text, pdf_file.filename, pdf_file_name)
+            pdf_file_name = file_name.split('.')[-2]
+            upload_file_to_pinecone(text, file_name, pdf_file_name)
 
         # Create lesson in database
-        data = {
-            "course_id": course_id,
-            "title": title,
-            "role": role,
-            "topic": topic,
-            "industry": industry,
-            "convert_type": convert_type,
-            "pdf_name":pdf_file_name
-        }
         lesson_id = create_lesson_service(data)
 
         return {"message": "Lesson created successfully", "lesson_id": lesson_id}
@@ -869,40 +857,28 @@ async def get_lesson(req: Request):
     return lesson
 
 @app.put("/backend/lessons",status_code=status.HTTP_200_OK)
-async def update_lesson(
-    lesson_id: Optional[int] = Form(None),
-    title: Optional[str] = Form(None),
-    role: Optional[str] = Form(None),
-    topic: Optional[str] = Form(None),
-    industry: Optional[str] = Form(None),
-    convert_type: Optional[str] = Form(None),
-    pdf_file: Optional[UploadFile] | None = File(None)):
+async def update_lesson(req: Request):
 
-    pdf_name = None
-    if pdf_file is not None:    
+    data = await req.json()
+    if "file_name" in data:    
+        file_name = data["file_name"]
         #Deleting previous PDF
+        lesson_id = data["lesson_id"]
         prev_PDF = get_lesson_PDF(lesson_id)
         delete_index(prev_PDF)
 
-        pdf_name = (pdf_file.filename).split('.')[-2] if pdf_file else None
-        if pdf_file:
-            pdf_content = await pdf_file.read() 
-            pdf_stream = BytesIO(pdf_content)   
+        response = s3.get_object(Bucket=LESSON_BUCKET, Key=file_name)
+        if response:
+            pdf_stream = response['Body'].read()  
             # Create a file-like stream
-            text = convert_pdf_to_txt_file(pdf_stream)
+            text = convert_pdf_to_txt_file(BytesIO(pdf_stream))
             # Upload to Pinecone
-            upload_file_to_pinecone(text, pdf_file.filename, pdf_name)
+            pdf_file_name = file_name.split('.')[-2]
+            upload_file_to_pinecone(text, file_name, pdf_file_name)
             
     # Filter only fields that are not None
-    data = {k: v for k, v in {
-        "title": title,
-        "role": role,
-        "topic": topic,
-        "industry": industry,
-        "convert_type": convert_type
-    }.items() if v is not None}
 
-    update_lesson_service(lesson_id, data,pdf_name)
+    update_lesson_service(data)
     return {"message": "Lesson updated successfully"}
 
 @app.post("/backend/deleteLessons",status_code=status.HTTP_200_OK)
@@ -919,10 +895,10 @@ def create_assessment(req: Request):
     assessment_id = create_assessment_service(data)
     return {"message": "Assessment created successfully", "assessment_id": assessment_id}
 
-@app.post("/backend/assessments/{assessment_id}")
+@app.post("/backend/allAssessments")
 async def get_assessment(req: Request):
     data = await req.json()
-    assessment = get_assessment_service(data["assessment_id"])
+    assessment = get_all_assessment_service(data["assessment_id"])
     if not assessment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assessment not found")
     return {"status_code": status.HTTP_200_OK, "data": assessment}
