@@ -488,3 +488,137 @@ def delete_MCQ(MCQ_id):
     query = "DELETE FROM MCQ WHERE id = %s"
     db.execute(query, (MCQ_id,))
     connection.commit()
+
+def get_company_by_user_service(user_id: int):
+    query = """
+    SELECT company_id 
+    FROM company_users 
+    WHERE user_id = %s
+    """
+    db.execute(query, (user_id,))
+    result = db.fetchone()
+    return result
+
+def get_MCQ_by_assessment_service(assessment_id: int):
+    query = """
+    SELECT mcq_id 
+    FROM assessments 
+    WHERE assessment_id = %s
+    """
+    db.execute(query, (assessment_id,))
+    result = db.fetchone()
+    return result
+
+def get_course_id_by_name(course_name):
+    query = """
+    SELECT id 
+    FROM courses 
+    WHERE LOWER(title) = LOWER(%s)
+    LIMIT 1
+    """
+    db.execute(query, (course_name,))
+    result = db.fetchone()
+    return result['id'] if result else None
+
+def get_lesson_id_by_name(lesson_name):
+    query = """
+    SELECT id 
+    FROM lessons 
+    WHERE LOWER(title) = LOWER(%s)
+    LIMIT 1
+    """
+    db.execute(query, (lesson_name,))
+    result = db.fetchone()
+    return result['id'] if result else None
+
+def get_assessment_id_by_name(assessment_name):
+    query = """
+    SELECT id 
+    FROM assessments 
+    WHERE LOWER(title) = LOWER(%s)
+    LIMIT 1
+    """
+    db.execute(query, (assessment_name,))
+    result = db.fetchone()
+    return result['id'] if result else None
+
+def get_mcq_question_message(mcq_id):
+    # Query to fetch questions and answers
+    query = """
+    SELECT questions, answers 
+    FROM MCQ 
+    WHERE id = %s
+    """
+    db.execute(query, (mcq_id,))
+    result = db.fetchone()
+
+    if not result:
+        return "No MCQ found with the given ID."
+
+    # Extract data
+    questions = result['questions'].split(';')
+    answers = eval(result['answers'])  # Ensure correct format if stored as a string
+
+    # Format the MCQ message
+    message = "MCQ Questions:\n\n"
+    for idx, question in enumerate(questions, 1):
+        message += f"{idx}. {question}\n"
+        options = answers.get(f"Q{idx}", [])
+        for opt_idx, option in enumerate(options, 1):
+            message += f"   {chr(64+opt_idx)}. {option}\n"
+        message += "\n"
+
+    return message
+
+def get_feedback_questions_service(course_id):
+    """
+    Fetch feedback questions associated with a specific course ID.
+    """
+    # Query to fetch feedback questions
+    query = """
+    SELECT feedback_question 
+    FROM feedbacks 
+    WHERE course_id = %s
+    """
+    db.execute(query, (course_id,))
+    feedbacks = db.fetchall()
+
+    if not feedbacks:
+        return "No feedback questions found for the given course ID."
+
+    # Format the feedback questions
+    message = "Feedback Questions:\n\n"
+    for idx, feedback in enumerate(feedbacks, 1):
+        message += f"{idx}. {feedback['feedback_question']}\n"
+
+    return message
+
+
+def add_feedback_service(course_id, user_id, feedback):
+    """
+    Insert a new feedback entry into the database.
+    """
+    query = """
+    INSERT INTO user_feedback (user_id, course_id, feedback, created_at, updated_at)
+    VALUES (%s, %s, %s, NOW(), NOW())
+    """
+    db.execute(query, (user_id, course_id, feedback))
+    connection.commit()
+    return db.lastrowid
+
+def get_correct_answers_service(assessment_name):
+    query = """
+    SELECT mq.mcq_id, mq.questions, mq.correct_answers
+    FROM assessments a
+    JOIN mcqs mq ON a.id = mq.assessment_id
+    WHERE a.title = %s
+    """
+    db.execute(query, (assessment_name,))
+    results = db.fetchall()
+
+    # Format answers as a dictionary
+    correct_answers = {
+        str(result["mcq_id"]): result["correct_answers"]
+        for result in results
+    }
+    return correct_answers

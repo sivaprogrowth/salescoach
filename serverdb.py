@@ -964,6 +964,124 @@ async def create_MCQ(req : Request):
     create_MCQ_service(data)
     return {"message": "Feedback deleted successfully"}
 
+#GLIFIC APIs
+@app.post("/backend/getCoursesGlific",status_code=status.HTTP_200_OK)
+async def getCoursesGlific(req : Request):
+    data = await req.json()
+    user_id = data['user_id']
+    company_id = get_company_by_user_service(user_id)
+    if not company_id:
+        raise HTTPException(status_code=404, detail="User not associated with any company")
+
+    try:
+        courses = get_all_courses_service(company_id=company_id)
+        if not courses:
+            raise HTTPException(status_code=404, detail="No courses found")
+        course_titles = [course["title"] for course in courses]
+        message = "Courses available to you are as follows:\n" + "\n".join(
+            [f"{i+1}. {title}" for i, title in enumerate(course_titles)]
+        )
+        
+        return {"message": message}
+    except Exception as e:
+        return HTTPException(status_code=500, detail= str(e))
+
+@app.post("/backend/getLessonsGlific",status_code=status.HTTP_200_OK)
+async def getLessonsGlific(req : Request):
+    data = req.json()
+    course_title = data['course_title']
+    course_id = get_course_id_by_name(course_title)
+    lessons = get_lessons_service(course_id)
+    if not lessons:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lesson not found")
+    lesson_titles = [lesson["title"] for lesson in lessons]
+    message = "Lessons available to you are as follows:\n" + "\n".join(
+        [f"{i+1}. {title}" for i, title in enumerate(lesson_titles)]
+    )    
+    return {"message": message}
+
+@app.post("/backend/getAssessmentsGlific",status_code=status.HTTP_200_OK)
+async def getAssessmentsGlific(req : Request):
+    data = await req.json()
+    lesson_title = data['lesson_title']
+    lesson_id = get_lesson_id_by_name(lesson_title)
+    assessments = get_all_assessment_service(lesson_id)
+    if not assessments:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lesson not found")
+    assessment_titles = [assessments["title"] for assessment in assessments]
+    message = "Assessments available to you are as follows:\n" + "\n".join(
+        [f"{i+1}. {title}" for i, title in enumerate(assessment_titles)]
+    )    
+    return {"message": message}
+
+@app.post("/backend/getMCQGlific",status_code=status.HTTP_200_OK)
+async def get_MCQ(req : Request):
+    data = await req.json()
+    assessment_title = data['assessment_title']
+    assessment_id = get_assessment_id_by_name(assessment_title)
+    MCQ_id = get_MCQ_by_assessment_service(assessment_id)
+    if not MCQ_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MCQ not found")   
+    return get_mcq_question_message(MCQ_id)
+
+@app.post("/backend/compareAnswers",status_code=status.HTTP_200_OK)
+async def compareAnswers(req : Request):
+    data = await req.json()
+    user_answers = data["answers"]  # User's submitted answers
+    assessment_name = data["assessment_name"]
+
+    try:
+        # Fetch the correct answers from the database
+        correct_answers = get_correct_answers_service(assessment_name)
+
+        if not correct_answers:
+            raise HTTPException(status_code=404, detail="Assessment not found")
+
+        # Compare answers
+        total_questions = len(correct_answers)
+        correct_count = sum(
+            1 for qid, answer in user_answers.items() if correct_answers.get(qid) == answer
+        )
+
+        # Generate response message
+        message = (
+            f"You answered {correct_count} out of {total_questions} questions correctly."
+        )
+        return {"message": message, "correct_count": correct_count, "total_questions": total_questions}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/backend/getFeedbackGlific",status_code=status.HTTP_200_OK)
+async def get_MCQ(req : Request):
+    data = req.json()
+    course_title = data['course_title']
+    course_id = get_course_id_by_name(course_title)
+    feedback = get_lessons_service(course_id)
+    if not feedback:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="feedback not found")
+    return get_feedback_questions_service(course_id)  
+     
+@app.post("/backend/addFeedback", status_code=status.HTTP_201_CREATED)
+async def add_feedback(req: Request):
+    try:
+        data = await req.json()
+        course_title = data['course_title']
+        course_id = get_course_id_by_name(course_title)
+        feedback_id = add_feedback_service(
+            course_id, 
+            user_id=data["user_id"], 
+            feedback=data["feedback"]
+        )
+
+        return {"message": "Feedback added successfully", "feedback_id": feedback_id}
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred: {str(e)}"
+        )
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
