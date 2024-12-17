@@ -627,6 +627,14 @@ async def publish_to_sns(request: Request):
                  'idx': {
                     'DataType': 'String',
                     'StringValue': request['idx']
+                },
+                'user_id': {
+                    'DataType': 'Number',
+                    'StringValue': request['user_id']
+                },
+                'course_title': {
+                    'DataType': 'String',
+                    'StringValue': request['course_title']
                 }
             }
         )
@@ -663,16 +671,21 @@ async def sns_listener(request: Request):
         message_attributes = body['MessageAttributes'] or {}
         transactionId = message_attributes.get('transactionId', {}).get('Value')
         idx = message_attributes.get('idx', {}).get('Value')
+        user_id = message_attributes.get('user_id', {}).get('Value')
+        course_title = message_attributes.get('idx', {}).get('course_title')
+        course_id = get_course_id_by_name(course_title)
         result  = await run_script(body['Message'],idx)
         data = (
             result, # message
             transactionId,  # transactionId
-            idx 
+            idx,
+            course_id,
+            user_id 
         )
         insert_query = """
-                            INSERT INTO textRag (message, tranId, idx) 
-                            VALUES (%s, %s, %s)
-                        """
+                        INSERT INTO textRag (message, tranId, idx, course_id, user_id)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """
         cursor.execute(insert_query, data)
         connection.commit()
         print("sent to glific successfully: ",response)
@@ -833,14 +846,9 @@ async def create_lesson(req:Request):
             # Create a file-like stream
             text = convert_pdf_to_txt_file(BytesIO(pdf_stream))
             # Upload to Pinecone
-<<<<<<< Updated upstream
             pdf_file_name = file_name.split('.')[-2]
             upload_file_to_pinecone(text, file_name, pdf_file_name)
 
-=======
-            upload_file_to_pinecone(text, pdf_file.filename, pdf_file_name)
-            print("Upload Done")
->>>>>>> Stashed changes
         # Create lesson in database
         lesson_id = create_lesson_service(data)
 

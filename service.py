@@ -259,11 +259,7 @@ def update_lesson_service(data):
     connection.commit()
 
 def delete_lesson_service(lesson_id):
-<<<<<<< Updated upstream
-    prev_idx = get_lesson_PDF(lesson_id)[0].split('.')[-2]
-=======
     prev_idx = (get_lesson_PDF(lesson_id))[0]
->>>>>>> Stashed changes
     print(prev_idx)
     delete_index(prev_idx)
     query = "DELETE FROM lessons WHERE id = %s"
