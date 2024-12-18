@@ -967,7 +967,7 @@ async def delete_feedback(req : Request):
 async def get_all_feedback(req : Request):
     data = await req.json()
     course_id = data['course_id']
-    feedbacks = get_all_feedback(course_id)
+    feedbacks = get_all_feedback_services(course_id)
     return feedbacks
 
 @app.post("/backend/createMCQ",status_code=status.HTTP_200_OK)

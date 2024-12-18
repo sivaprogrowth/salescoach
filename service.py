@@ -398,12 +398,12 @@ def get_feedback_service(feedback_id):
 
     return feedback
 
-def get_all_feedback(course_id):
+def get_all_feedback_services(course_id):
     """
     Fetch courses filtered by company_id with optional date and latest_added filters.
     """
     # Base query
-    query = "SELECT * FROM feedback WHERE course_id = %s"
+    query = "SELECT * FROM feedbacks WHERE course_id = %s"
     values = [course_id]  # Initial value for the company_id filter
 
     # Execute the query with parameterized values
@@ -414,8 +414,8 @@ def get_all_feedback(course_id):
     formatted_feedbacks = []
     for feedback in feedbacks:
         formatted_feedbacks.append({
-            "feedback": feedback["feedback_question"],
-            "created_at": feedback["created_at"]
+            "feedback": feedback[2],
+            "created_at": feedback[3].strftime("%d %b %Y")
         })
 
     return formatted_feedbacks
