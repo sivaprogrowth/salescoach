@@ -46,7 +46,7 @@ def index_init(name: str, dims: int=1536):
     return get_index(name)
     
 def get_index(index_name: str):
-    idx = pc.Index(host=index_name)
+    idx = pc.Index(name = index_name)
     return idx
 
 def get_all_docs(index_name: str):

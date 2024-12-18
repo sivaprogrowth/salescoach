@@ -865,11 +865,14 @@ async def create_lesson(req:Request):
 async def get_lesson(req: Request):
     data = await req.json()
     course_id = data['course_id']
-    lesson = get_lessons_service(course_id)
-    if not lesson:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lesson not found")
-    return lesson
-
+    try:
+        lesson = get_lessons_service(course_id)
+        if not lesson:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lesson not found")
+        return lesson
+    except Exception as e:
+        return HTTPException(status_code=500, detail= str(e))
+    
 @app.put("/backend/lessons",status_code=status.HTTP_200_OK)
 async def update_lesson(req: Request):
 
