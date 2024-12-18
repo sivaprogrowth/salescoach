@@ -217,8 +217,13 @@ def get_lessons_service(course_id):
         formatted_lessons.append({
             "lesson_id": lesson[0],
             "title": lesson[1],
-            "created_at": lesson[2].strftime("%d %b %Y"),  # Format date as 15 Dec 2001
-            "updated_at": lesson[3].strftime("%d %b %Y")   # Format date as 15 Dec 2001
+            "role":lesson[2],
+            "topic":lesson[3],
+            "industry":lesson[4],
+            "convert_type":lesson[5],
+            "pdf":lesson[6],
+            "created_at": lesson[7].strftime("%d %b %Y"),  # Format date as 15 Dec 2001
+            "updated_at": lesson[8].strftime("%d %b %Y")   # Format date as 15 Dec 2001
         })
 
     return formatted_lessons
