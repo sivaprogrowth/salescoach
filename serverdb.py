@@ -868,7 +868,7 @@ async def get_lesson(req: Request):
     try:
         lesson = get_lessons_service(course_id)
         if not lesson:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lesson not found")
+            raise HTTPException(status_code=status.HTTP_200_OK, detail="Lesson not found")
         return lesson
     except Exception as e:
         return HTTPException(status_code=500, detail= str(e))
