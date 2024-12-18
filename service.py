@@ -414,6 +414,7 @@ def get_all_feedback_services(course_id):
     formatted_feedbacks = []
     for feedback in feedbacks:
         formatted_feedbacks.append({
+            "feedback_id":feedback[0],
             "feedback": feedback[2],
             "created_at": feedback[3].strftime("%d %b %Y")
         })
