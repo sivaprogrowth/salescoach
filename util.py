@@ -228,8 +228,19 @@ def convert_pdf_to_txt_file(path):
     retstr.close()
     return t 
 
-def delete_index(index):
-    pc.delete_index(index)
+def delete_index(index_name: str):
+    # Get the list of existing indexes
+    existing_indexes = get_index_list().names()
+    index_name = index_name.split(".")[-2]
+    print(existing_indexes)
+    # Check if the index exists
+    if index_name in existing_indexes:
+        print(f"Index '{index_name}' found. Deleting it...")
+        pc.delete_index(index_name)
+        print(f"Index '{index_name}' deleted.")
+    else:
+        print(f"Index '{index_name}' does not exist.")
+
 
 def generate_QNA(title , objective , no_of_questions , idx):
     input  = title+"."+objective

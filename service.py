@@ -467,7 +467,8 @@ def create_MCQ_service(data):
     query = "SELECT pdf FROM lessons WHERE id = %s"
     db.execute(query, (lesson_id,))
     idx = (db.fetchone())[0]
-
+    idx = idx.split('.')[-2]
+    print(idx)
     questions , answers = generate_QNA(title , objective , no_of_questions , idx)
 
     query = """
