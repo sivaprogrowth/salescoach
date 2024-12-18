@@ -192,6 +192,11 @@ def get_lessons_service(course_id):
     SELECT 
         l.id AS lesson_id,
         l.title,
+        l.role,
+        l.topic,
+        l.industry,
+        l.convert_type,
+        l.pdf,
         l.created_at,
         l.updated_at
     FROM 
