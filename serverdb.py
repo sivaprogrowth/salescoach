@@ -847,7 +847,8 @@ async def create_lesson(req:Request):
             text = convert_pdf_to_txt_file(BytesIO(pdf_stream))
             # Upload to Pinecone
             pdf_file_name = file_name.split('.')[-2]
-            upload_file_to_pinecone(text, file_name, pdf_file_name)
+            res = upload_file_to_pinecone(text, file_name, pdf_file_name)
+            print (res)
 
         # Create lesson in database
         lesson_id = create_lesson_service(data)
