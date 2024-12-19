@@ -65,12 +65,11 @@ def get_all_docs(index_name: str):
     
 
 
-def find_match(input, index_name):
+def find_match(input, index_name,k = 1):
     # input_em = openai_vectorizer.embed_query(input)
     input_em = embeddings.embed_query(input) 
     index = get_index(index_name)
-    result = index.query(vector=input_em, top_k=2, includeMetadata=True)
-    print(result)
+    result = index.query(vector=input_em, top_k=k, includeMetadata=True, include_values=False)
     match_text = ''
     for match in result.get('matches', []):
         match_text += match.get('metadata', {}).get('text', '') + "\n"
@@ -283,7 +282,7 @@ def generate_QNA(title , objective , no_of_questions , idx):
         
     # Get response from OpenAI's completion model
     completion = client.chat.completions.create(
-        model="gpt-4",
+        model="gpt-4-32k",
         messages=[{"role": "user", "content": prompt}],
         max_tokens=150
     )

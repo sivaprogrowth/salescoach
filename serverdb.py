@@ -974,7 +974,6 @@ async def get_all_feedback(req : Request):
         return feedbacks
     except Exception as e:
         return HTTPException(status_code=500, detail= str(e))
-    return feedbacks
 
 @app.post("/backend/createMCQ",status_code=status.HTTP_200_OK)
 async def create_MCQ(req : Request):
