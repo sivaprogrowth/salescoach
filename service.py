@@ -147,7 +147,6 @@ def get_all_courses_service(company_id, date=None, latest_added=None):
     # Execute the query with parameterized values
     db.execute(query, tuple(values))
     courses = db.fetchall()
-
     # Format the result like get_one_course_service
     formatted_courses = [
         {
@@ -283,7 +282,7 @@ def create_assessment_service(data):
     VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
     """
     db.execute(query, (
-        data['course_id'], data['title'], data.get('objective'), data.get('number_of_questions'),data.get('mcq_id')
+        data['lesson_id'], data['title'], data.get('objective'), data.get('number_of_questions'),data.get('mcq_id')
     ))
     connection.commit()
     return db.lastrowid
@@ -298,31 +297,37 @@ def get_all_assessment_service(lesson_id):
     SELECT 
         l.id AS assessment_id,
         l.title,
+        l.objective, 
+        l.number_of_questions, 
+        l.mcq_id,
         l.created_at,
         l.updated_at
     FROM 
-        lessons l
+        assessments l
     WHERE 
-        l.course_id = %s
+        l.lesson_id = %s
     ORDER BY 
         l.created_at ASC
     """
 
     # Execute the query with the course_id parameter
     db.execute(query, (lesson_id,))
-    lessons = db.fetchall()
+    assessments = db.fetchall()
 
     # Format the result
-    formatted_lessons = []
-    for lesson in lessons:
-        formatted_lessons.append({
-            "assesment_id": lesson[0],
-            "title": lesson[1],
-            "created_at": lesson[2].strftime("%d %b %Y"),  # Format date as 15 Dec 2001
-            "updated_at": lesson[3].strftime("%d %b %Y")   # Format date as 15 Dec 2001
+    formatted_assessments = []
+    for assessment in assessments:
+        formatted_assessments.append({
+            "assesment_id": assessment[0],
+            "title": assessment[1],
+            "objective": assessment[2],
+            "number_of_questions":assessment[3], 
+            "mcq_id":assessment[4],
+            "created_at": assessment[5].strftime("%d %b %Y"),  # Format date as 15 Dec 2001
+            "updated_at": assessment[6].strftime("%d %b %Y")   # Format date as 15 Dec 2001
         })
 
-    return formatted_lessons
+    return formatted_assessments
 
 def update_assessment_service(assessment_id, data):  
     """
@@ -357,21 +362,11 @@ def update_assessment_service(assessment_id, data):
     # Execute the query
     db.execute(query, tuple(values))
     connection.commit()
-    query = """
-    UPDATE assessments
-    SET course_id = %s, title = %s, objective = %s, number_of_questions = %s, updated_at = NOW()
-    WHERE id = %s
-    """
-    db.execute(query, (
-        data['course_id'], data['title'], data.get('objective'),
-        data.get('number_of_questions'), assessment_id
-    ))
-    db.connection.commit()
-
+    
 def delete_assessment_service(assessment_id):
-    prev_MCQ = get_lesson_PDF(assessment_id)[0]
+    prev_MCQ = get_MCQ_by_assessment_service(assessment_id)[0]
     delete_MCQ(prev_MCQ)
-    query = "DELETE FROM lessons WHERE id = %s"
+    query = "DELETE FROM assessments WHERE id = %s"
     db.execute(query, (assessment_id,))
     connection.commit()
 
@@ -459,6 +454,17 @@ def delete_feedback_service(feedback_id):
     db.execute(query, (feedback_id,))
     connection.commit()
 
+def get_MCQ_service(mcq_id):
+    query = "SELECT questions, answers FROM MCQ WHERE mcq_id = %s"
+    db.execute(query, (mcq_id,))
+    mcq = db.fetchone()
+    mcq={
+            "questions": mcq[0],
+            "answers": mcq[1],
+        }
+
+    return mcq
+
 def get_lesson_PDF(lesson_id):
     query = "SELECT pdf FROM lessons WHERE id = %s"
     db.execute(query, (lesson_id,))
@@ -490,10 +496,10 @@ def create_MCQ_service(data):
     db.execute(query, (no_of_questions, json.dumps(questions), answers))
     connection.commit()
   
-    return db.lastrowid
+    return db.lastrowid , questions , answers
 
 def delete_MCQ(MCQ_id):
-    query = "DELETE FROM MCQ WHERE id = %s"
+    query = "DELETE FROM MCQ WHERE mcq_id = %s"
     db.execute(query, (MCQ_id,))
     connection.commit()
 
@@ -511,7 +517,7 @@ def get_MCQ_by_assessment_service(assessment_id: int):
     query = """
     SELECT mcq_id 
     FROM assessments 
-    WHERE assessment_id = %s
+    WHERE id = %s
     """
     db.execute(query, (assessment_id,))
     result = db.fetchone()
@@ -526,7 +532,7 @@ def get_course_id_by_name(course_name):
     """
     db.execute(query, (course_name,))
     result = db.fetchone()
-    return result['id'] if result else None
+    return result[0] if result else None
 
 def get_lesson_id_by_name(lesson_name):
     query = """
@@ -538,6 +544,17 @@ def get_lesson_id_by_name(lesson_name):
     db.execute(query, (lesson_name,))
     result = db.fetchone()
     return result['id'] if result else None
+
+def get_index_by_lesson(lesson_name):
+    query = """
+    SELECT pdf 
+    FROM lessons 
+    WHERE LOWER(title) = LOWER(%s)
+    LIMIT 1
+    """
+    db.execute(query, (lesson_name,))
+    result = db.fetchone()
+    return result[0] if result else None
 
 def get_assessment_id_by_name(assessment_name):
     query = """
@@ -597,9 +614,9 @@ def get_feedback_questions_service(course_id):
     # Format the feedback questions
     message = "Feedback Questions:\n\n"
     for idx, feedback in enumerate(feedbacks, 1):
-        message += f"{idx}. {feedback['feedback_question']}\n"
+        message += f"{idx}. {feedback[0]}\n"
 
-    return message
+    return {"message":message}
 
 
 def add_feedback_service(course_id, user_id, feedback):

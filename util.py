@@ -241,64 +241,76 @@ def delete_index(index_name: str):
         print(f"Index '{index_name}' does not exist.")
 
 
-def generate_QNA(title , objective , no_of_questions , idx):
-    input  = title+"."+objective
-    docs = find_match(input, idx)
+def generate_QNA(title , objective , no_of_questions , idx, retry_count=0, max_retries=3):
+    try:
+        input  = title+"."+objective
+        docs = find_match(input, idx)
 
-    format = """
-            {
-                "quiz": [
-                    {
-                        "question": "Your question here",
-                        "options": "1) Option A, 2) Option B, 3) Option C"
-                    },
-                    {
-                        "question": "Another question here",
-                        "options": "1) Option X, 2) Option Y, 3) Option Z"
+        format = """
+                {
+                    "quiz": [
+                        {
+                            "question": "Your question here",
+                            "options": "1) Option A, 2) Option B, 3) Option C"
+                        },
+                        {
+                            "question": "Another question here",
+                            "options": "1) Option X, 2) Option Y, 3) Option Z"
+                        }
+                    ],
+                    "answers": {
+                        "1": "1",
+                        "2": "1"
                     }
-                ],
-                "answers": {
-                    "1",
-                    "3"
                 }
-            }
-            """
-    
-    # Prepare prompt for OpenAI completion
-    prompt = f"""You are an AI assessment generator. Use the provided title, objective, and retrieved data to create a multiple-choice quiz. Follow these instructions carefully:
-
-    Question Structure: Create clear, concise, and relevant multiple-choice questions based on the retrieved data. Ensure questions are directly related to the title and objective.
-    Answer Options: Provide three distinct answer options for each question, labeled 1), 2), and 3). Ensure only one answer is correct while the others are plausible distractors.
-    Answers Section: List the correct answers corresponding to the questions. Use only the correct answer option numbers (e.g., 1, 2, 3).
-    The number of questions generated will be {no_of_questions}.
-
-    Title:{title}
-    Objective:{objective}
-    retrieved data:{docs}
-    Output Format:{format}
-
-    follow the output format strictly . 
-    """
+                """
         
-    # Get response from OpenAI's completion model
-    completion = client.chat.completions.create(
-        model="gpt-4-32k",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=150
-    )
-    print("OpenAI response received")
-    res = completion.choices[0].message.content
+        # Prepare prompt for OpenAI completion
+        prompt = f"""You are an AI assessment generator. Use the provided title, objective, and retrieved data to create a multiple-choice quiz. Follow these instructions carefully:
 
-    # Remove extra whitespace
-    cleaned_output = res.strip()
-    quiz_data = json.loads(cleaned_output.replace("'", '"'))
-    formatted_questions = [
-        {
-            "question": item["question"],
-            "options": item["options"]
-        }
-        for item in quiz_data['quiz']
-    ]
-    answers_str = json.dumps(list(quiz_data['answers']))
-    return formatted_questions , answers_str
+        Question Structure: Create clear, concise, and relevant multiple-choice questions based on the retrieved data. Ensure questions are directly related to the title and objective.
+        Answer Options: Provide three distinct answer options for each question, labeled 1), 2), and 3). Ensure only one answer is correct while the others are plausible distractors.
+        Answers Section: List the correct answers corresponding to the questions. Use only the correct answer option numbers (e.g., 1, 2, 3).
+        The number of questions generated will be {no_of_questions}.
+
+        Title:{title}
+        Objective:{objective}
+        retrieved data:{docs}
+        Output Format:{format}
+
+        follow the output format strictly . 
+        """
+            
+        # Get response from OpenAI's completion model
+        completion = client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=150
+        )
+        print("OpenAI response received")
+        res = completion.choices[0].message.content
+        print(res)
+        # Remove extra whitespace
+        cleaned_output = res.strip()
+        quiz_data = json.loads(cleaned_output)
+        formatted_questions = [
+            {
+                "question": item["question"],
+                "options": item["options"]
+            }
+            for item in quiz_data['quiz']
+        ]
+        answers_str = json.dumps(list(quiz_data['answers']))
+        return formatted_questions , answers_str
+
+    except (json.JSONDecodeError, KeyError, Exception) as e:
+        print(f"Error occurred: {e}")
+
+        # Retry logic
+        if retry_count < max_retries:
+            print(f"Retrying... Attempt {retry_count + 1} of {max_retries}")
+            return generate_QNA(title, objective, no_of_questions, idx, retry_count + 1, max_retries)
+        else:
+            print("Max retries reached. Returning empty data.")
+            return [], "[]"
 
