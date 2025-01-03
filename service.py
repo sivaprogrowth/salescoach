@@ -1,4 +1,5 @@
 from dotenv import load_dotenv
+from fastapi import HTTPException
 from util import *
 import os , json
 import mysql.connector
@@ -287,47 +288,98 @@ def create_assessment_service(data):
     connection.commit()
     return db.lastrowid
 
-def get_all_assessment_service(lesson_id):
+def get_all_assessment_service(course_id):
     """
     Fetch all lessons associated with a given course_id.
     The result includes formatted created_at and updated_at timestamps.
     """
     # Query to fetch lessons for a specific course
     query = """
-    SELECT 
-        l.id AS assessment_id,
-        l.title,
-        l.objective, 
-        l.number_of_questions, 
-        l.mcq_id,
-        l.created_at,
-        l.updated_at
-    FROM 
-        assessments l
-    WHERE 
-        l.lesson_id = %s
-    ORDER BY 
-        l.created_at ASC
+        SELECT 
+            l.id AS lesson_id,
+            l.title AS lesson_title,
+            a.id AS assessment_id,
+            a.title AS assessment_title,
+            a.objective,
+            a.number_of_questions,
+            a.mcq_id,
+            a.created_at,
+            a.updated_at
+        FROM 
+            lessons l
+        LEFT JOIN assessments a ON l.id = a.lesson_id
+        WHERE 
+            l.course_id = %s
+        ORDER BY 
+            l.created_at ASC, a.created_at ASC
+    """
+
+    # Execute the query with the course_id parameter
+    db.execute(query, (course_id,))
+    results = db.fetchall()
+
+    formatted_results = []
+    for row in results:
+        # Ensure that the assessment exists in the row before processing it
+        if row[2]:  # Check if there is an assessment_id (row[2] corresponds to assessment_id)
+            # Prepare the assessment details
+            assessment = {
+                "assessment_id": row[2],
+                "title": row[3],
+                "objective": row[4],
+                "number_of_questions": row[5],
+                "mcq_id": row[6],
+                "created_at": row[7].strftime("%d %b %Y"),
+                "updated_at": row[8].strftime("%d %b %Y"),
+                "lesson_id": row[0],  # Add lesson_id for reference
+                "lesson_title": row[1]  # Add lesson_title for reference
+            }
+            # Append assessment to the formatted results list
+            formatted_results.append(assessment)
+
+    # Return the list of assessments with lesson information
+    return formatted_results
+
+def get_all_assessment_by_lesson_service(lesson_id):
+    """
+    Fetch all lessons associated with a given course_id.
+    The result includes formatted created_at and updated_at timestamps.
+    """
+    # Query to fetch lessons for a specific course
+    query = """
+        SELECT 
+            *
+        FROM 
+            assessments a
+        WHERE 
+            lesson_id = %s
     """
 
     # Execute the query with the course_id parameter
     db.execute(query, (lesson_id,))
-    assessments = db.fetchall()
+    results = db.fetchall()
 
-    # Format the result
-    formatted_assessments = []
-    for assessment in assessments:
-        formatted_assessments.append({
-            "assesment_id": assessment[0],
-            "title": assessment[1],
-            "objective": assessment[2],
-            "number_of_questions":assessment[3], 
-            "mcq_id":assessment[4],
-            "created_at": assessment[5].strftime("%d %b %Y"),  # Format date as 15 Dec 2001
-            "updated_at": assessment[6].strftime("%d %b %Y")   # Format date as 15 Dec 2001
-        })
+    formatted_results = []
+    for row in results:
+        # Ensure that the assessment exists in the row before processing it
+        if row[2]:  # Check if there is an assessment_id (row[2] corresponds to assessment_id)
+            # Prepare the assessment details
+            assessment = {
+                "assessment_id": row[0],
+                "lesson_id": row[1],  # Add lesson_id for reference
+                "title": row[2],
+                "objective": row[3],
+                "number_of_questions": row[4],
+                "mcq_id": row[5],
+                "created_at": row[6].strftime("%d %b %Y"),
+                "updated_at": row[7].strftime("%d %b %Y"),
+            }
+            # Append assessment to the formatted results list
+            formatted_results.append(assessment)
 
-    return formatted_assessments
+    # Return the list of assessments with lesson information
+    return formatted_results
+
 
 def update_assessment_service(assessment_id, data):  
     """
@@ -543,7 +595,7 @@ def get_lesson_id_by_name(lesson_name):
     """
     db.execute(query, (lesson_name,))
     result = db.fetchone()
-    return result['id'] if result else None
+    return result[0] if result else None
 
 def get_index_by_lesson(lesson_name):
     query = """
@@ -565,35 +617,38 @@ def get_assessment_id_by_name(assessment_name):
     """
     db.execute(query, (assessment_name,))
     result = db.fetchone()
-    return result['id'] if result else None
+    return result[0] if result else None
 
 def get_mcq_question_message(mcq_id):
     # Query to fetch questions and answers
     query = """
     SELECT questions, answers 
     FROM MCQ 
-    WHERE id = %s
+    WHERE mcq_id = %s
     """
-    db.execute(query, (mcq_id,))
+    db.execute(query, (mcq_id[0],))
     result = db.fetchone()
 
     if not result:
         return "No MCQ found with the given ID."
 
     # Extract data
-    questions = result['questions'].split(';')
-    answers = eval(result['answers'])  # Ensure correct format if stored as a string
+    questions = result[0].split(';')
+    answers = eval(result[1])  # Ensure correct format if stored as a string
+    questions = json.loads(questions[0])
 
+    print("questions ",questions)
+    print("answers ",answers)
     # Format the MCQ message
     message = "MCQ Questions:\n\n"
-    for idx, question in enumerate(questions, 1):
-        message += f"{idx}. {question}\n"
-        options = answers.get(f"Q{idx}", [])
-        for opt_idx, option in enumerate(options, 1):
-            message += f"   {chr(64+opt_idx)}. {option}\n"
-        message += "\n"
+    for idx, question in enumerate(questions):
+        print(question)
+        message += f"{idx}. {question['question']}\n"
+        options = question['options']
+        message += options
+        message += "\n\n"
 
-    return message
+    return message , ",".join(answers)
 
 def get_feedback_questions_service(course_id):
     """
@@ -612,22 +667,22 @@ def get_feedback_questions_service(course_id):
         return "No feedback questions found for the given course ID."
 
     # Format the feedback questions
-    message = "Feedback Questions:\n\n"
+    message = "Feedback Questions:\n"
     for idx, feedback in enumerate(feedbacks, 1):
         message += f"{idx}. {feedback[0]}\n"
 
     return {"message":message}
 
 
-def add_feedback_service(course_id, user_id, feedback):
+def add_feedback_service(course_id,feedback_question,feedback_question_id, user_id, feedback):
     """
     Insert a new feedback entry into the database.
     """
     query = """
-    INSERT INTO user_feedback (user_id, course_id, feedback, created_at, updated_at)
-    VALUES (%s, %s, %s, NOW(), NOW())
+    INSERT INTO user_feedback (user_id, course_id, feedback_question_id, feedback_question, feedback, created_at, updated_at)
+    VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
     """
-    db.execute(query, (user_id, course_id, feedback))
+    db.execute(query, (user_id, course_id, feedback_question_id,feedback_question, feedback))
     connection.commit()
     return db.lastrowid
 
@@ -647,3 +702,223 @@ def get_correct_answers_service(assessment_name):
         for result in results
     }
     return correct_answers
+
+def get_user_count_by_company_service(company_id: int) -> int:
+    """
+    Fetch the count of users associated with a given company ID.
+    """
+    query = """
+        SELECT COUNT(*) AS user_count
+        FROM company_users
+        WHERE company_id = %s
+    """
+    
+    # Execute the query
+    db.execute(query, (company_id,))
+    result = db.fetchone()
+
+    # Return the user count
+    return result[0] if result else 0
+
+def get_course_count_by_company_service(company_id: int) -> int:
+    """
+    Fetch the count of courses associated with a given company ID.
+    """
+    query = """
+        SELECT COUNT(*) AS course_count
+        FROM courses
+        WHERE company_id = %s
+    """
+    
+    # Execute the query
+    db.execute(query, (company_id,))
+    result = db.fetchone()
+
+    # Return the course count
+    return result[0] if result else 0
+
+def get_assessment_count_by_company_service(company_id: int) -> int:
+    """
+    Fetch the count of assessments associated with a given company ID.
+    """
+    query = """
+        SELECT COUNT(DISTINCT a.id) AS assessment_count
+        FROM courses c
+        JOIN lessons l ON c.id = l.course_id
+        JOIN assessments a ON l.id = a.lesson_id
+        WHERE c.company_id = %s
+    """
+    
+    # Execute the query
+    db.execute(query, (company_id,))
+    result = db.fetchone()
+
+    # Return the assessment count
+    return result[0] if result else 0
+
+def get_user_count_by_city(company_id: int):
+    """
+    Fetch the user count per city, grouped by monthly and weekly basis for a given company ID.
+    
+    Args:
+    - company_id (int): The ID of the company.
+    
+    Returns:
+    - Dictionary with user counts for monthly and weekly periods.
+    """
+    # SQL Query for Monthly User Count
+    monthly_query = """
+        SELECT 
+            u.city,
+            COUNT(u.user_id) AS user_count,
+            EXTRACT(YEAR FROM u.created_at) AS year,
+            EXTRACT(MONTH FROM u.created_at) AS month
+        FROM 
+            users u
+        JOIN 
+            company_users cu ON u.user_id = cu.user_id
+        WHERE 
+            cu.company_id = %s
+        GROUP BY 
+            u.city, EXTRACT(YEAR FROM u.created_at), EXTRACT(MONTH FROM u.created_at)
+        ORDER BY 
+            year DESC, month DESC;
+    """
+    
+    # SQL Query for Weekly User Count
+    weekly_query = """
+        SELECT 
+            u.city,
+            COUNT(u.user_id) AS user_count,
+            EXTRACT(YEAR FROM u.created_at) AS year,
+            EXTRACT(WEEK FROM u.created_at) AS week
+        FROM 
+            users u
+        JOIN 
+            company_users cu ON u.user_id = cu.user_id
+        WHERE 
+            cu.company_id = %s
+        GROUP BY 
+            u.city, EXTRACT(YEAR FROM u.created_at), EXTRACT(WEEK FROM u.created_at)
+        ORDER BY 
+            year DESC, week DESC;
+    """
+
+    try:
+        # Execute the monthly query
+        db.execute(monthly_query, (company_id,))
+        monthly_result = db.fetchall()
+
+        # Execute the weekly query
+        db.execute(weekly_query, (company_id,))
+        weekly_result = db.fetchall()
+
+        # Format the result into a dictionary with two keys: "monthly" and "weekly"
+        formatted_result = {
+            "monthly": [
+                {
+                    "city": row[0],
+                    "user_count": row[1],
+                    "year": row[2],
+                    "month": row[3],
+                }
+                for row in monthly_result
+            ],
+            "weekly": [
+                {
+                    "city": row[0],
+                    "user_count": row[1],
+                    "year": row[2],
+                    "week": row[3],
+                }
+                for row in weekly_result
+            ]
+        }
+
+        return formatted_result
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching data: {e}")
+
+def get_feedback_for_company(company_id):
+    try:
+        # Query to fetch feedback for all courses linked to a company
+        query = """
+            SELECT 
+                u.name as user_name, 
+                uf.feedback
+            FROM 
+                user_feedback uf
+            JOIN 
+                company_users cu ON cu.user_id = uf.user_id
+            JOIN 
+                users u ON u.user_id = cu.user_id
+            JOIN 
+                courses c ON c.id = uf.course_id
+            WHERE 
+                c.company_id = %s
+        """
+        values = (company_id,)
+
+        # Execute the query
+        db.execute(query, values)
+        results = db.fetchall()
+
+        # Format the feedback data
+        feedback_list = [
+            {
+                "user_name": row[0],
+                "feedback": row[1]
+            }
+            for row in results
+        ]
+
+        return feedback_list
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving feedback for company: {str(e)}")
+
+def get_dashboard_data_service(company_id):
+    try:
+        # Get all the necessary data
+        userCount = get_user_count_by_company_service(company_id)
+        courseCount = get_course_count_by_company_service(company_id)
+        assessmentCount = get_assessment_count_by_company_service(company_id)
+        trainingCompletionRate = 80  # You can calculate this based on your logic
+        userCountByCity = get_user_count_by_city(company_id)
+        feedbackInfo = get_feedback_for_company(company_id)
+
+        # Prepare the data as a dictionary
+        dashboard_data = {
+            "user_count": userCount,
+            "course_count": courseCount,
+            "assessment_count": assessmentCount,
+            "training_completion_rate": trainingCompletionRate,
+            "user_count_by_city": userCountByCity,
+            "feedback_info": feedbackInfo
+        }
+
+        return dashboard_data
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving dashboard data: {str(e)}")
+
+def get_feedback_question_id_by_question(question_text):
+    """
+    Fetch the feedback_question_id from the feedbacks table by matching question text.
+    """
+    try:
+        query = """
+            SELECT id 
+            FROM feedbacks 
+            WHERE LOWER(feedback_question) = LOWER(%s)
+        """
+        db.execute(query, (question_text,))
+        result = db.fetchone()
+        if not result:
+            raise ValueError(f"No feedback question found for text: {question_text}")
+
+        return result[0]  # Return the ID
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching feedback question ID: {str(e)}")
+

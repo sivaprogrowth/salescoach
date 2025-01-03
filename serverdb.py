@@ -282,7 +282,8 @@ async def run_script(message: str, idx : str) -> str:
         prompt = f"""Act as a guide for people with strong coaching and career counselling credentials and 
                     who has lot of experience of guiding young employees and candidates in India.
                     Based on the following data:\n{pinecone_result}\nGenerate a response to the query message {message}. If you dont know the answer, give them a message “Currently I dont know the response but please reach me on https://www.yogyabano.com/contact-us to get specific response for your query”.Be specific and provide your responses in 5- 8 bullet points. Well formatted and with relevant examples, wherever required.
-                    In the end of every response, please give them a relevant sentence that prompts them to ask more questions.."""
+                    In the end of every response, please give them a relevant sentence that prompts them to ask more questions.
+                    """
         
         # prompt = f"Based on the following data:\n{pinecone_result}\nGenerate a response to the query message {message}."
         
@@ -325,7 +326,6 @@ def get_auth_token():
 
 
 async def send_to_glific_api(flow_id: int, contact_id: int, result: str):
-    print("I am sending message:",result)
     try:
         auth_token = get_auth_token()
         graphql_query = """
@@ -608,17 +608,26 @@ async def fetchChatVoice(req: Request):
     cursor.execute(f"DELETE FROM chats WHERE `index` = {index}")
     return {'status_code':status.HTTP_200_OK}
 
-app.post("/backend/publishTextRag",status_code=status.HTTP_200_OK)
+@app.post("/backend/publishTextRag",status_code=status.HTTP_200_OK)
 async def publish_to_sns_text_rag(request: Request):
-    print("i am in text rag")
     try:
         # Publish message to SNS with attributes
         current_datetime = datetime.now()
         datetime_string = current_datetime.strftime("%Y%m%d%H%M%S")
-        print(SNS_TOPIC_TEXT_RAG_ARN)
         request = await request.json()
+
+        course_number = int(request['course_number'])
+        courses_name = request['courses_name']
+        course_title = courses_name.split("\n")[course_number].split(".")[1].strip()
+
+        lesson_number = int(request['lesson_number'])
+        lessons_name = request['lessons_name']
+        lesson_name = lessons_name.split("\n")[lesson_number].split(".")[1].strip()
+
+        print("course title ",course_title)
+        print("lesson name ",lesson_name)
         sns_response = sns_client.publish(
-            TopicArn=SNS_TOPIC_ARN,
+            TopicArn=SNS_TOPIC_TEXT_RAG_ARN,
             Message=request['message'],
             MessageAttributes={
                 'transactionId': {
@@ -627,19 +636,23 @@ async def publish_to_sns_text_rag(request: Request):
                 },
                  'lesson_name': {
                     'DataType': 'String',
-                    'StringValue': request['lesson_name']
+                    'StringValue': lesson_name
                 },
                 'user_id': {
-                    'DataType': 'Number',
+                    'DataType': 'String',
                     'StringValue': request['user_id']
                 },
                 'course_title': {
                     'DataType': 'String',
-                    'StringValue': request['course_title']
+                    'StringValue': course_title
                 },
                 'flow_id': {
                     'DataType': 'Number',
-                    'StringValue': request['flow_id']
+                    'StringValue': str(request['flow_id'])
+                },
+                'contact_id': {
+                    'DataType': 'Number',
+                    'StringValue': str(request['contact_id'])
                 }
             }
         )
@@ -677,11 +690,16 @@ async def sns_listener(request: Request):
         transactionId = message_attributes.get('transactionId', {}).get('Value')
         lesson_name = message_attributes.get('lesson_name', {}).get('Value')
         flow_id = message_attributes.get('flow_id', {}).get('Value')
+        contact_id = message_attributes.get('contact_id', {}).get('Value')
         user_id = message_attributes.get('user_id', {}).get('Value')
-        course_title = message_attributes.get('course_title', {}).get('course_title')
+        course_title = message_attributes.get('course_title', {}).get('Value')
+        print("course_title",course_title)
+        print("lesson name ",lesson_name)
         idx = get_index_by_lesson(lesson_name)
+        print("idx ",idx)
         course_id = get_course_id_by_name(course_title)
-        result  = await run_script(body['Message'],idx)
+        result  = await run_script(body['Message'],idx.split(".")[-2])
+        result = repr(result).strip("'\"")
         data = (
             result, # message
             transactionId,  # transactionId
@@ -925,7 +943,7 @@ async def create_assessment(req: Request):
 async def get_assessment(req: Request):
     data = await req.json()
     try:
-        assessment = get_all_assessment_service(data["lesson_id"])
+        assessment = get_all_assessment_service(data["course_id"])
         if not assessment:
             raise HTTPException(status_code=status.HTTP_200_OK, detail="Assessment not found")
         return {"status_code": status.HTTP_200_OK, "data": assessment}
@@ -1026,7 +1044,9 @@ async def getCoursesGlific(req : Request):
 @app.post("/backend/getLessonsGlific",status_code=status.HTTP_200_OK)
 async def getLessonsGlific(req : Request):
     data = await req.json()
-    course_title = data['course_title']
+    course_number = int(data['course_number'])
+    courses_name = data['courses_name']
+    course_title = courses_name.split("\n")[course_number].split(".")[1].strip()
     course_id = get_course_id_by_name(course_title)
     lessons = get_lessons_service(course_id)
     if not lessons:
@@ -1040,12 +1060,14 @@ async def getLessonsGlific(req : Request):
 @app.post("/backend/getAssessmentsGlific",status_code=status.HTTP_200_OK)
 async def getAssessmentsGlific(req : Request):
     data = await req.json()
-    lesson_title = data['lesson_title']
-    lesson_id = get_lesson_id_by_name(lesson_title)
-    assessments = get_all_assessment_service(lesson_id)
+    lesson_number = int(data['lesson_number'])
+    lessons_name = data['lessons_name']
+    lesson_name = lessons_name.split("\n")[lesson_number].split(".")[1].strip()
+    lesson_id = get_lesson_id_by_name(lesson_name)
+    assessments = get_all_assessment_by_lesson_service(lesson_id)
     if not assessments:
         raise HTTPException(status_code=status.HTTP_200_OK, detail="Assessments not found")
-    assessment_titles = [assessments["title"] for assessment in assessments]
+    assessment_titles = [assessment['title'] for assessment in assessments]
     message = "Assessments available to you are as follows:\n" + "\n".join(
         [f"{i+1}. {title}" for i, title in enumerate(assessment_titles)]
     )    
@@ -1054,60 +1076,76 @@ async def getAssessmentsGlific(req : Request):
 @app.post("/backend/getMCQGlific",status_code=status.HTTP_200_OK)
 async def getMCQGlific(req : Request):
     data = await req.json()
-    assessment_title = data['assessment_title']
-    assessment_id = get_assessment_id_by_name(assessment_title)
+    assessment_number = int(data['assessment_number'])
+    assessments_name = data['assessments_name']
+    assessments_name = assessments_name.split("\n")[assessment_number].split(".")[1].strip()
+    assessment_id = get_assessment_id_by_name(assessments_name)
     MCQ_id = get_MCQ_by_assessment_service(assessment_id)
     if not MCQ_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MCQ not found")
-    res =  get_mcq_question_message(MCQ_id) 
-    return {"message":res}
+    res , correct_answers =  get_mcq_question_message(MCQ_id) 
+    return {"message":res , "correct_answers":correct_answers}
 
 @app.post("/backend/compareAnswers",status_code=status.HTTP_200_OK)
-async def compareAnswers(req : Request):
+async def compareAnswers(req: Request):
     data = await req.json()
-    user_answers = data["answers"]  # User's submitted answers
-    assessment_name = data["assessment_name"]
-
+    user_answers = data["user_answers"]  # User's answers as a string
+    correct_answers = data["correct_answers"]  # Correct answers as a string
     try:
-        # Fetch the correct answers from the database
-        correct_answers = get_correct_answers_service(assessment_name)
-
-        if not correct_answers:
-            raise HTTPException(status_code=404, detail="Assessment not found")
+        # Split the answers into lists
+        user_answers_list = user_answers.split(",")
+        correct_answers_list = correct_answers.split(",")
+        # Check if the number of answers matches
+        if len(user_answers_list) != len(correct_answers_list):
+            return {"message": "Answer counts do not match. Please check your submission."}
 
         # Compare answers
-        total_questions = len(correct_answers)
         correct_count = sum(
-            1 for qid, answer in user_answers.items() if correct_answers.get(qid) == answer
+            1 for u, c in zip(user_answers_list, correct_answers_list) if u == c
         )
+        wrong_count = len(user_answers_list) - correct_count
 
         # Generate response message
-        message = (
-            f"You answered {correct_count} out of {total_questions} questions correctly."
-        )
-        return {"message": message, "correct_count": correct_count, "total_questions": total_questions}
+        total_questions = len(correct_answers_list)
+        message = f"You answered {correct_count} out of {total_questions} questions correctly. {wrong_count} answers were incorrect."
+
+        return {"message": message,}
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"message": f"An error occurred: {str(e)}"}
 
 @app.post("/backend/getFeedbackGlific",status_code=status.HTTP_200_OK)
 async def getFeedbackGlific(req : Request):
     data = await req.json()
-    course_title = data['course_title']
+    course_number = int(data['course_number'])
+    courses_name = data['courses_name']
+    course_title = courses_name.split("\n")[course_number].split(".")[1].strip()
     course_id = get_course_id_by_name(course_title)
     feedback = get_feedback_questions_service(course_id)
     if not feedback:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="feedback not found")
+        return {"message":"No feedback available for this course."}
     return  feedback
      
 @app.post("/backend/addFeedback", status_code=status.HTTP_201_CREATED)
 async def add_feedback(req: Request):
     try:
         data = await req.json()
-        course_title = data['course_title']
+
+        course_number = int(data['course_number'])
+        courses_name = data['courses_name']
+        course_title = courses_name.split("\n")[course_number].split(".")[1].strip()
         course_id = get_course_id_by_name(course_title)
+
+        feedback_number = int(data["feedback_number"])
+        feedback_questions = data['feedback_questions']
+        print(feedback_questions.split("\n"))
+        feedback_question = feedback_questions.split("\n")[feedback_number].split(".")[1].strip()
+        feedback_question_id = get_feedback_question_id_by_question(feedback_question)
+        print("here")
         feedback_id = add_feedback_service(
             course_id, 
+            feedback_question,
+            feedback_question_id,
             user_id=data["user_id"], 
             feedback=data["feedback"]
         )
@@ -1120,6 +1158,20 @@ async def add_feedback(req: Request):
             detail=f"An unexpected error occurred: {str(e)}"
         )
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+@app.post("/backend/dashboard",status_code=status.HTTP_200_OK)
+async def dashboard(req:Request):
+    try:
+        data = await req.json()
+        company_id = data["company_id"]
+        user_id = data["user_id"]
+        result = get_dashboard_data_service(company_id)
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred: {str(e)}"
+        )
+
+# if __name__ == "__main__":
+#     import uvicorn
+#     uvicorn.run(app, host="0.0.0.0", port=8000)
