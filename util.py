@@ -241,7 +241,7 @@ def delete_index(index_name: str):
         print(f"Index '{index_name}' does not exist.")
 
 
-def generate_QNA(title , objective , no_of_questions , idx, retry_count=0, max_retries=3):
+def generate_QNA(title , objective , no_of_questions , idx, retry_count=0, max_retries=5):
     try:
         input  = title+"."+objective
         docs = find_match(input, idx)
