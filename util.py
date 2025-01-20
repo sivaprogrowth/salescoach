@@ -4,8 +4,10 @@ import cv2  # We're using OpenCV to read video, to install !pip install opencv-p
 import base64
 from dotenv import load_dotenv
 import os
+from pydub import AudioSegment
 import json
 import wave
+import fitz
 from io import StringIO
 from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
 from pdfminer.converter import TextConverter
@@ -114,7 +116,7 @@ def get_conversation_string():
         conversation_string += "Bot: "+ st.session_state['responses'][i+1] + "\n"
     return conversation_string
 
-def upload_file_to_pinecone(raw_text, file_name, index_name):
+async def upload_file_to_pinecone(raw_text, file_name, index_name):
     # Splitting up the text into smaller chunks for indexing
     try:
         text_splitter = CharacterTextSplitter(        
@@ -216,16 +218,16 @@ def convert_pdf_to_txt_file(path):
     laparams = LAParams()
     device = TextConverter(rsrcmgr, retstr, laparams=laparams)
     interpreter = PDFPageInterpreter(rsrcmgr, device)
-    
-    file_pages = PDFPage.get_pages(path)
-    nbPages = len(list(file_pages))
-    for page in PDFPage.get_pages(path):
-        interpreter.process_page(page)
-        t = retstr.getvalue()
-
-    device.close()
-    retstr.close()
-    return t 
+    try:
+        for page in PDFPage.get_pages(path):
+            interpreter.process_page(page)
+        text = retstr.getvalue()
+    except Exception as e:
+        raise Exception(f"Failed to process PDF: {str(e)}")
+    finally:
+        device.close()
+        retstr.close()
+    return text 
 
 def delete_index(index_name: str):
     # Get the list of existing indexes
@@ -241,7 +243,7 @@ def delete_index(index_name: str):
         print(f"Index '{index_name}' does not exist.")
 
 
-def generate_QNA(title , objective , no_of_questions , idx, retry_count=0, max_retries=5):
+def generate_QNA(title , objective , no_of_questions , idx):
     try:
         input  = title+"."+objective
         docs = find_match(input, idx)
@@ -305,12 +307,26 @@ def generate_QNA(title , objective , no_of_questions , idx, retry_count=0, max_r
 
     except (json.JSONDecodeError, KeyError, Exception) as e:
         print(f"Error occurred: {e}")
+        return generate_QNA(title, objective, no_of_questions, idx)
 
-        # Retry logic
-        if retry_count < max_retries:
-            print(f"Retrying... Attempt {retry_count + 1} of {max_retries}")
-            return generate_QNA(title, objective, no_of_questions, idx, retry_count + 1, max_retries)
-        else:
-            print("Max retries reached. Returning empty data.")
-            return [], "[]"
 
+def download_audio(url, output_file, output_format="mp3"):
+    try:
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+        audio = AudioSegment.from_ogg(io.BytesIO(response.content))
+        audio.export(output_file, format=output_format)
+        print(f"File downloaded and converted to {output_format.upper()}: {output_file}")
+    
+    except requests.exceptions.RequestException as e:
+        print(f"Error downloading the audio: {e}")
+    except Exception as e:
+        print(f"Error processing the audio: {e}")
+
+def extract_text_from_pdf(pdf_stream):
+    """
+    Extracts text from a PDF file stream using PyMuPDF.
+    """
+    with fitz.open(stream=pdf_stream, filetype="pdf") as doc:
+        text = chr(12).join([page.get_text() for page in doc])
+    return text

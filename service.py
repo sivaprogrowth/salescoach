@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 from fastapi import HTTPException
 from util import *
 import os , json
+from datetime import datetime
 import mysql.connector
 load_dotenv()
 
@@ -429,7 +430,7 @@ def create_feedback_service(data):
     INSERT INTO feedbacks (course_id, feedback_question, created_at, updated_at)
     VALUES (%s, %s, NOW(), NOW())
     """
-    db.execute(query, (data['course_id'], data.get('feedback_question')))
+    db.execute(query, (data['course_id'], data.get('feedback_question').strip()))
     connection.commit()
     return db.lastrowid
 
@@ -846,7 +847,8 @@ def get_feedback_for_company(company_id):
         query = """
             SELECT 
                 u.name as user_name, 
-                uf.feedback
+                uf.feedback,
+                uf.created_at
             FROM 
                 user_feedback uf
             JOIN 
@@ -868,7 +870,9 @@ def get_feedback_for_company(company_id):
         feedback_list = [
             {
                 "user_name": row[0],
-                "feedback": row[1]
+                "feedback": row[1],
+                "created_at":row[2],
+                "profile":"https://app-yogyabano.s3.ap-south-1.amazonaws.com/image.png"
             }
             for row in results
         ]
@@ -921,4 +925,91 @@ def get_feedback_question_id_by_question(question_text):
         return result[0]  # Return the ID
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching feedback question ID: {str(e)}")
+
+def get_question_count_voice(user_id , idx):
+    check_query = "SELECT COUNT(*) FROM user_qna_progress WHERE user_id = %s AND idx = %s"
+    db.execute(check_query, (user_id,idx))
+    result = db.fetchone()
+
+    return result
+
+def reset_progress_qna_service(user_id, idx):
+    reset_query = """
+            UPDATE user_qna_progress 
+            SET is_answered = 0, user_response = NULL
+            WHERE user_id = %s
+            AND idx = %s
+            """
+    db.execute(reset_query, (user_id,idx))
+    connection.commit()
+
+def initialize_progress_qna_service(user_id,idx):
+    initialize_query = """
+    INSERT INTO user_qna_progress (user_id, qna_id, idx)
+    SELECT %s, id , %s
+    FROM qna
+    WHERE idx = %s
+    """
+    db.execute(initialize_query, (user_id,idx , idx))
+    connection.commit()
+
+def get_next_question_service(user_id , idx):
+    query = """
+        SELECT q.question
+        FROM qna q
+        JOIN user_qna_progress uqp ON q.id = uqp.qna_id
+        WHERE uqp.user_id = %s AND uqp.idx = %s AND uqp.is_answered = 0
+        ORDER BY qna_id ASC
+        LIMIT 1
+    """
+    db.execute(query, (user_id,idx))
+    next_question = db.fetchone()
+    if not next_question:
+        return {"message": "No unanswered questions found."}
+    audio_data = next_question[0]   
+    print("The Question is : ",audio_data) 
+    current_datetime = datetime.now()
+    datetime_string = current_datetime.strftime("%Y%m%d%H%M%S")
+    file_name = f"output_{datetime_string}.wav"
+    print(f"Saving audio data to {file_name}...")
+
+    save_wav_file(file_name, audio_data)
+    audio_url = upload_audio_to_s3(file_name)
+    print(f"Audio file uploaded to S3. URL: {audio_url}")
+    
+    # Remove the local file after uploading
+    print(f"Removing local file {file_name}...")
+    os.remove(file_name)
+    return {'status_code': status.HTTP_200_OK, 'audio_url': audio_url, 'text':audio_data, "qna_id":next_question[0]}
+
+def submit_answer_service(user_response,user_id,qna_id):
+    download_audio(user_response,"reply2.wav", "wav")
+    user_response = transcribe()
+    query = """
+        UPDATE user_qna_progress
+        SET is_answered = 1, user_response = %s
+        WHERE user_id = %s AND qna_id = %s
+    """
+    db.execute(query, (user_response, user_id, qna_id))
+    connection.commit()
+    if db.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Progress entry not found.")
+
+def get_lesson_content_type_service(lesson_id: int):
+    """
+    Retrieve the content type for a specific lesson by its ID.
+    """
+    try:
+        query = "SELECT convert_type FROM lessons WHERE id = %s"
+        db.execute(query, (lesson_id,))
+        result = db.fetchone()
+
+        if not result:
+            raise HTTPException(status_code=404, detail="Lesson not found")
+
+        return result[0]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
 

@@ -291,7 +291,6 @@ async def run_script(message: str, idx : str) -> str:
         completion = client.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=150
         )
         print("OpenAI response received")
         return completion.choices[0].message.content
@@ -664,7 +663,7 @@ async def publish_to_sns_text_rag(request: Request):
         raise HTTPException(status_code=500, detail="Failed to send message to SNS")
     
 @app.post("/backend/snsTextRag")
-async def sns_listener(request: Request):
+async def sns_listener_TextRag(request: Request):
     headers = request.headers
     message_type = headers.get("x-amz-sns-message-type")
 
@@ -700,6 +699,8 @@ async def sns_listener(request: Request):
         course_id = get_course_id_by_name(course_title)
         result  = await run_script(body['Message'],idx.split(".")[-2])
         result = repr(result).strip("'\"")
+        response =  await send_to_glific_api(flow_id , contact_id,result)
+        print("sent to glific successfully: ",response)
         data = (
             result, # message
             transactionId,  # transactionId
@@ -713,8 +714,6 @@ async def sns_listener(request: Request):
                     """
         cursor.execute(insert_query, data)
         connection.commit()
-        response =  await send_to_glific_api(flow_id , contact_id,result)
-        print("sent to glific successfully: ",response)
     # If unknown message type, return 400 error
     else:
         raise HTTPException(status_code=400, detail="Unknown message type")
@@ -870,15 +869,14 @@ async def create_lesson(req:Request):
         if response:
             pdf_stream = response['Body'].read()  
             # Create a file-like stream
-            text = convert_pdf_to_txt_file(BytesIO(pdf_stream))
+            text = extract_text_from_pdf(BytesIO(pdf_stream))
             # Upload to Pinecone
             pdf_file_name = file_name.split('.')[-2]
-            res = upload_file_to_pinecone(text, file_name, pdf_file_name)
+            res = await upload_file_to_pinecone(text, file_name, pdf_file_name)
             print (res)
 
         # Create lesson in database
         lesson_id = create_lesson_service(data)
-
         return {"message": "Lesson created successfully", "lesson_id": lesson_id}
 
     except Exception as e:
@@ -1138,10 +1136,9 @@ async def add_feedback(req: Request):
 
         feedback_number = int(data["feedback_number"])
         feedback_questions = data['feedback_questions']
-        print(feedback_questions.split("\n"))
         feedback_question = feedback_questions.split("\n")[feedback_number].split(".")[1].strip()
+        print("Feedback_Question : ", feedback_question)
         feedback_question_id = get_feedback_question_id_by_question(feedback_question)
-        print("here")
         feedback_id = add_feedback_service(
             course_id, 
             feedback_question,
@@ -1172,6 +1169,83 @@ async def dashboard(req:Request):
             detail=f"An unexpected error occurred: {str(e)}"
         )
 
-# if __name__ == "__main__":
-#     import uvicorn
-#     uvicorn.run(app, host="0.0.0.0", port=8000)
+@app.post("/backend/initialize_progress",status_code=status.HTTP_200_OK)
+async def initialize_progress(req : Request):
+    """
+    Initializes or resets progress for a user. If progress exists, reset it;
+    otherwise, initialize progress for the first time.
+    """
+    data = await req.json()
+    user_id = data.get("user_id")
+    lesson_number = int(data['lesson_number'])
+    lessons_name = data['lessons_name']
+    lesson_name = lessons_name.split("\n")[lesson_number].split(".")[1].strip()
+    lesson_id = get_lesson_id_by_name(lesson_name)
+    # idx = get_lesson_PDF(lesson_id)
+    idx = "vmartethics"
+    try:
+        # Check if the user already has progress in the user_qna_progress table
+        result = get_question_count_voice(user_id, idx)        
+        if result[0] > 0:
+            # If progress exists, reset it
+            reset_progress_qna_service(user_id, idx)
+            return {"message": "Existing progress found. Progress reset successfully."}
+        else:
+            # If no progress exists, initialize it
+            initialize_progress_qna_service(user_id,idx)
+            return {"message": "No existing progress found. Progress initialized successfully."}
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+@app.post("/backend/next_question",status_code=status.HTTP_200_OK)
+async def get_next_question(req: Request):
+    """Fetch the next unanswered question for a user."""
+    data = await req.json()
+    user_id = data.get("user_id")
+    idx = "vmartethics"
+    try:
+        next_question = get_next_question_service(user_id,idx)
+        return next_question
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+@app.post("/backend/submit_answer",status_code=status.HTTP_200_OK)
+async def submit_answer(req:Request):
+    """Submit a user's answer and mark the question as answered."""
+    data = await req.json()
+    user_response = data.get("user_response")
+    user_id = data.get("user_id")
+    qna_id = data.get("qna_id")
+    try:
+        submit_answer_service(user_response,user_id,qna_id)
+        return {"message": "Answer submitted successfully."}
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+@app.post("/backend/getLessonType", status_code=status.HTTP_200_OK)
+async def get_lesson_content_type(req:Request):
+    """
+    API endpoint to retrieve the content type of a specific lesson.
+    """
+    data = await req.json()
+    lesson_number = int(data['lesson_number'])
+    lessons_name = data['lessons_name']
+    lesson_name = lessons_name.split("\n")[lesson_number].split(".")[1].strip()
+    lesson_id = get_lesson_id_by_name(lesson_name)
+    try:
+        content_type = get_lesson_content_type_service(lesson_id)
+        return {"type":content_type}
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
