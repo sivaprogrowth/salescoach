@@ -17,7 +17,6 @@ import os , json
 import mysql.connector
 import queue
 import requests
-import mimetypes
 import io
 from io import BytesIO
 from typing import Optional
@@ -39,11 +38,8 @@ connection = mysql.connector.connect(
 )
 
 sns_client = boto3.client('sns', region_name='ap-south-1')
-s3 = boto3.client('s3')
 SNS_TOPIC_ARN = os.getenv('SNS_TOPIC_ARN') 
 SNS_TOPIC_TEXT_RAG_ARN = os.getenv('SNS_TOPIC_TEXT_RAG_ARN')
-S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
-AUDIO_DATA_FOLDER = os.getenv("AUDIO_DATA_FOLDER")
 # Glific API credentials
 GLIFIC_PHONE_NUMBER = os.getenv("GLIFIC_PHONE_NUMBER")
 GLIFIC_PASSWORD = os.getenv("GLIFIC_PASSWORD")
@@ -153,29 +149,6 @@ def getQuestionsAnswers(index):
         ques.append(qna[0])
         ans.append(qna[1])
     return ques , ans
-
-def speak(text):
-    audio_data = b''
-    with client.audio.speech.with_streaming_response.create(
-        model="tts-1",
-        voice="alloy",
-        input=text,
-        response_format="pcm"
-    ) as response:
-        for chunk in response.iter_bytes(1024):
-            audio_data += chunk 
-
-    return audio_data
-
-def transcribe():
-    print('i am in transcribe function..')
-    audio_file= open("reply2.wav", "rb")
-    transcription = client.audio.transcriptions.create(
-    model="whisper-1", 
-    file=audio_file
-    )
-    print(transcription.text)
-    return transcription.text
 
 def addToChat(type , message , index):
     data = (
@@ -362,38 +335,6 @@ async def send_to_glific_api(flow_id: int, contact_id: int, result: str):
 
     except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=500, detail=f"Error sending data to Glific API: {e}")
-
-def upload_audio_to_s3(audio_file_path):
-
-    s3_folder = AUDIO_DATA_FOLDER
-    audio_file_name = os.path.basename(audio_file_path)
-    s3_key = os.path.join(s3_folder, audio_file_name)
-    try:
-        s3.upload_file(
-            audio_file_path,
-            S3_BUCKET_NAME,
-            s3_key,
-            ExtraArgs={'ContentType': mimetypes.guess_type(audio_file_path)[0]}
-        )
-        audio_url = f"https://{S3_BUCKET_NAME}.s3.ap-south-1.amazonaws.com/{s3_key}"
-        print(f"Uploaded audio file to {audio_url}")
-        return audio_url
-    except ClientError as e:
-        print(f"Error uploading audio file to {S3_BUCKET_NAME}/{s3_key}: {e}")
-        return None
-    
-def download_audio(url, output_file, output_format="mp3"):
-    try:
-        response = requests.get(url, stream=True)
-        response.raise_for_status()
-        audio = AudioSegment.from_ogg(io.BytesIO(response.content))
-        audio.export(output_file, format=output_format)
-        print(f"File downloaded and converted to {output_format.upper()}: {output_file}")
-    
-    except requests.exceptions.RequestException as e:
-        print(f"Error downloading the audio: {e}")
-    except Exception as e:
-        print(f"Error processing the audio: {e}")
 
 # Utility Function: Validate Email
 def is_valid_email(email: str) -> bool:

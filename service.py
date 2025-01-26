@@ -955,7 +955,7 @@ def initialize_progress_qna_service(user_id,idx):
 
 def get_next_question_service(user_id , idx):
     query = """
-        SELECT q.question
+        SELECT q.question , q.id
         FROM qna q
         JOIN user_qna_progress uqp ON q.id = uqp.qna_id
         WHERE uqp.user_id = %s AND uqp.idx = %s AND uqp.is_answered = 0
@@ -966,34 +966,37 @@ def get_next_question_service(user_id , idx):
     next_question = db.fetchone()
     if not next_question:
         return {"message": "No unanswered questions found."}
-    audio_data = next_question[0]   
-    print("The Question is : ",audio_data) 
+    question = next_question[0]   
+    print("The Question is : ",question) 
     current_datetime = datetime.now()
     datetime_string = current_datetime.strftime("%Y%m%d%H%M%S")
-    file_name = f"output_{datetime_string}.wav"
+    file_name = f"output_{datetime_string}.mp3"
     print(f"Saving audio data to {file_name}...")
-
-    save_wav_file(file_name, audio_data)
+    audio_data = speak(question)
+    save_mp3_file(file_name, audio_data)
     audio_url = upload_audio_to_s3(file_name)
     print(f"Audio file uploaded to S3. URL: {audio_url}")
     
     # Remove the local file after uploading
     print(f"Removing local file {file_name}...")
     os.remove(file_name)
-    return {'status_code': status.HTTP_200_OK, 'audio_url': audio_url, 'text':audio_data, "qna_id":next_question[0]}
+    return {'audio_url': audio_url, 'message':next_question[0], "qna_id":next_question[1]}
 
 def submit_answer_service(user_response,user_id,qna_id):
-    download_audio(user_response,"reply2.wav", "wav")
-    user_response = transcribe()
-    query = """
-        UPDATE user_qna_progress
-        SET is_answered = 1, user_response = %s
-        WHERE user_id = %s AND qna_id = %s
-    """
-    db.execute(query, (user_response, user_id, qna_id))
-    connection.commit()
-    if db.rowcount == 0:
-        raise HTTPException(status_code=404, detail="Progress entry not found.")
+    try:
+        download_audio(user_response,"reply2.wav", "wav")
+        user_response = transcribe()
+        query = """
+            UPDATE user_qna_progress
+            SET is_answered = 1, user_response = %s
+            WHERE user_id = %s AND qna_id = %s
+        """
+        db.execute(query, (user_response, user_id, qna_id))
+        connection.commit()
+        if db.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Progress entry not found.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 def get_lesson_content_type_service(lesson_id: int):
     """

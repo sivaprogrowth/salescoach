@@ -3,11 +3,14 @@ from langchain.text_splitter import CharacterTextSplitter
 import cv2  # We're using OpenCV to read video, to install !pip install opencv-python
 import base64
 from dotenv import load_dotenv
-import os
+import os,requests,io
 from pydub import AudioSegment
 import json
 import wave
 import fitz
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
+import mimetypes
 from io import StringIO
 from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
 from pdfminer.converter import TextConverter
@@ -16,6 +19,9 @@ from pdfminer.pdfpage import PDFPage
 load_dotenv()
 
 os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
+s3 = boto3.client('s3')
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
+AUDIO_DATA_FOLDER = os.getenv("AUDIO_DATA_FOLDER")
 
 client = OpenAI()
 import streamlit as st
@@ -330,3 +336,56 @@ def extract_text_from_pdf(pdf_stream):
     with fitz.open(stream=pdf_stream, filetype="pdf") as doc:
         text = chr(12).join([page.get_text() for page in doc])
     return text
+
+def upload_audio_to_s3(audio_file_path):
+    s3_folder = AUDIO_DATA_FOLDER
+    audio_file_name = os.path.basename(audio_file_path)
+    s3_key = os.path.join(s3_folder, audio_file_name)
+    try:
+        s3.upload_file(
+            audio_file_path,
+            S3_BUCKET_NAME,
+            s3_key,
+            ExtraArgs={'ContentType': mimetypes.guess_type(audio_file_path)[0]}
+        )
+        audio_url = f"https://{S3_BUCKET_NAME}.s3.ap-south-1.amazonaws.com/{s3_key}"
+        print(f"Uploaded audio file to {audio_url}")
+        return audio_url
+    except Exception as e:
+        print(f"Error uploading audio file to {S3_BUCKET_NAME}/{s3_key}: {e}")
+        return None
+
+def speak(text):
+    audio_data = b''
+    with client.audio.speech.with_streaming_response.create(
+        model="tts-1",
+        voice="alloy",
+        input=text,
+        response_format="pcm"
+    ) as response:
+        for chunk in response.iter_bytes(1024):
+            audio_data += chunk 
+
+    return audio_data
+
+def transcribe():
+    print('i am in transcribe function..')
+    audio_file= open("reply2.wav", "rb")
+    transcription = client.audio.transcriptions.create(
+    model="whisper-1", 
+    file=audio_file
+    )
+    print(transcription.text)
+    return transcription.text
+
+def save_mp3_file(filename, audio_data, sample_rate=22050, num_channels=1):
+    # Convert raw audio data into an AudioSegment
+    audio_segment = AudioSegment(
+        data=audio_data,
+        sample_width=2,  # Assuming 16-bit audio
+        frame_rate=sample_rate,
+        channels=num_channels
+    )
+    
+    # Export the audio segment as an MP3 file
+    audio_segment.export(filename, format="mp3")
