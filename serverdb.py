@@ -19,10 +19,11 @@ import queue
 import requests
 import io
 from io import BytesIO
-from typing import Optional
+from typing import Optional, List
 import re
 import boto3
 import tempfile
+import crud
 import shutil
 load_dotenv()
 
@@ -1186,7 +1187,1010 @@ async def get_lesson_content_type(req:Request):
         raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+    
 
+@app.post("/backend/addSchool")
+async def add_school(request: Request):
+        school = await request.json()
+        insert_query = """
+            INSERT INTO schools (school_type, company_id, name, email, city, state, description, country) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        cursor.execute(insert_query, (
+            school["school_type"], 
+            school["company_id"], 
+            school["name"], 
+            school["email"], 
+            school["city"], 
+            school["state"], 
+            school["description"], 
+            school["country"]
+        ))
+        connection.commit()
+        return {"school_id": cursor.lastrowid}
+
+@app.get("/backend/viewSchool")
+async def view_school(request: Request):
+        try:
+            school_id = request.query_params.get('school_id')
+            if not school_id:
+                raise HTTPException(status_code=400, detail="Missing school_id in query parameters")
+            
+            cursor.execute("SELECT * FROM schools WHERE school_id = %s", (school_id,))
+            db_school = cursor.fetchone()
+            
+            if db_school is None:
+                raise HTTPException(status_code=404, detail="School not found")
+            
+            school = {
+                "school_id": db_school[0],
+                "school_type": db_school[1],
+                "company_id": db_school[2],
+                "name": db_school[3],
+                "email": db_school[4],
+                "city": db_school[5],
+                "state": db_school[6],
+                "description": db_school[7],
+                "country": db_school[8]
+            }
+            
+            return school
+        
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/backend/editSchool")
+async def edit_school(request: Request):
+        school_update = await request.json()
+        school_id = school_update["school_id"]
+        update_query = """
+            UPDATE schools SET 
+                school_type = %s, 
+                company_id = %s, 
+                name = %s, 
+                email = %s, 
+                city = %s, 
+                state = %s, 
+                description = %s, 
+                country = %s 
+            WHERE school_id = %s
+        """
+        cursor.execute(update_query, (
+            school_update["school_type"], 
+            school_update["company_id"], 
+            school_update["name"], 
+            school_update["email"], 
+            school_update["city"], 
+            school_update["state"], 
+            school_update["description"], 
+            school_update["country"],
+            school_id
+        ))
+        connection.commit()
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="School not found")
+        return {"message": "School updated successfully"}
+
+@app.delete("/backend/deleteSchool")
+async def delete_school(school_id: int):
+        delete_query = "DELETE FROM schools WHERE school_id = %s"
+        cursor.execute(delete_query, (school_id,))
+        connection.commit()
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="School not found")
+        return {"message": "School deleted successfully"}
+
+@app.post("/backend/addGrades")
+async def add_grades(request: Request):
+    try:
+        grade = await request.json()
+        
+        # Debugging: Print the incoming JSON data
+        print(f"Received Grade Data: {grade}")
+        
+        # Ensure all necessary keys are present
+        required_keys = ["school_id", "name", "capacity", "subjects", "description", "industry", "date_created"]
+        for key in required_keys:
+            if key not in grade:
+                raise HTTPException(status_code=400, detail=f"Missing required field: {key}")
+        
+        insert_query = """
+            INSERT INTO grades (school_id, name, capacity, subjects, description, industry, date_created) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """
+        
+        # Debugging: Print the SQL query and parameters
+        print(f"Executing query: {insert_query}")
+        print(f"With parameters: ({grade['school_id']}, {grade['name']}, {grade['capacity']}, {grade['subjects']}, {grade['description']}, {grade['industry']}, {grade['date_created']})")
+        
+        cursor.execute(insert_query, (
+            grade["school_id"], 
+            grade["name"], 
+            grade["capacity"], 
+            grade["subjects"], 
+            grade["description"], 
+            grade["industry"],
+            grade["date_created"]
+        ))
+        connection.commit()
+        return {"grade_id": cursor.lastrowid}
+    except HTTPException as e:
+        return {"error": str(e)}
+    except Exception as e:
+        # Catch any other exceptions and return an error message
+        return {"error": f"An unexpected error occurred: {str(e)}"}
+    
+@app.get("/backend/viewGrades")
+async def view_grades(grade_id: int):
+        cursor.execute("SELECT * FROM grades WHERE grade_id = %s", (grade_id,))
+        db_grade = cursor.fetchone()
+        if db_grade is None:
+            raise HTTPException(status_code=404, detail="Grade not found")
+        return db_grade
+
+@app.put("/backend/editGrades")
+async def edit_grades(request: Request):
+    grade_update = await request.json()
+    grade_id = grade_update["grade_id"]
+    school_id = grade_update["school_id"]
+
+    
+    check_school_query = "SELECT 1 FROM schools WHERE school_id = %s"
+    cursor.execute(check_school_query, (school_id,))
+    if cursor.fetchone() is None:
+        raise HTTPException(status_code=400, detail="Invalid school_id")
+
+    
+    update_query = """
+        UPDATE grades SET 
+            school_id = %s, 
+            name = %s, 
+            capacity = %s, 
+            subjects = %s, 
+            description = %s, 
+            industry = %s 
+        WHERE grade_id = %s
+    """
+    cursor.execute(update_query, (
+        grade_update["school_id"], 
+        grade_update["name"], 
+        grade_update["capacity"], 
+        grade_update["subjects"], 
+        grade_update["description"], 
+        grade_update["industry"], 
+        grade_id
+    ))
+    connection.commit()
+
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Grade not found")
+
+    return {"message": "Grade updated successfully"}
+
+@app.delete("/backend/deleteGrades")
+async def delete_grades(grade_id: int):
+        delete_query = "DELETE FROM grades WHERE grade_id = %s"
+        cursor.execute(delete_query, (grade_id,))
+        connection.commit()
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Grade not found")
+        return {"message": "Grade deleted successfully"}
+
+@app.get("/schools/{company_id}", response_model=List[dict])
+async def get_schools(company_id: int):
+        cursor.execute("SELECT * FROM schools WHERE company_id = %s", (company_id,))
+        schools = cursor.fetchall()
+        if not schools:
+            raise HTTPException(status_code=404, detail="No schools found for this company ID")
+        
+        return [
+            {
+                "school_id": school[0],
+                "school_type": school[1],
+                "company_id": school[2],
+                "name": school[3],
+                "email": school[4],
+                "city": school[5],
+                "state": school[6],
+                "description": school[7],
+                "country": school[8]
+            } for school in schools
+        ]
+
+
+@app.post("/backend/school/addCourse")
+async def add_course(request: Request):
+    try:
+        course = await request.json()
+        
+        # Check for required fields
+        required_keys = ["name", "school_id", "grade_id", "description", "teacher_id", "capacity", "duration"]
+        for key in required_keys:
+            if key not in course:
+                raise HTTPException(status_code=400, detail=f"Missing required field: {key}")
+        
+        insert_query = """
+            INSERT INTO school_courses (name, school_id, grade_id, description, teacher_id, capacity, duration) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """
+        cursor.execute(insert_query, (
+            course["name"],
+            course["school_id"],
+            course["grade_id"],
+            course["description"],
+            course["teacher_id"],
+            course["capacity"],
+            course["duration"]
+        ))
+        connection.commit()
+        return {"course_id": cursor.lastrowid}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/backend/school/viewCourse")
+async def view_course(request: Request):
+    try:
+        course_id = request.query_params.get('course_id')
+        if not course_id:
+            raise HTTPException(status_code=400, detail="Missing course_id in query parameters")
+        
+        cursor.execute("SELECT * FROM school_courses WHERE course_id = %s", (course_id,))
+        db_course = cursor.fetchone()
+        
+        if db_course is None:
+            raise HTTPException(status_code=404, detail="Course not found")
+        
+        course = {
+            "course_id": db_course[0],
+            "name": db_course[1],
+            "description": db_course[2],
+            "teacher_id": db_course[3],
+            "capacity": db_course[4],
+            "duration": db_course[6]
+        }
+        
+        return course
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/backend/school/editCourse")
+async def edit_course(request: Request):
+    try:
+        course_update = await request.json()
+        course_id = course_update["course_id"]
+
+        # Check if course exists
+        cursor.execute("SELECT 1 FROM school_courses WHERE course_id = %s", (course_id,))
+        if cursor.fetchone() is None:
+            raise HTTPException(status_code=404, detail="Course not found")
+
+        update_query = """
+            UPDATE school_courses SET 
+                name = %s,
+                description = %s,
+                teacher_id = %s,
+                capacity = %s,
+                duration = %s
+            WHERE course_id = %s
+        """
+        cursor.execute(update_query, (
+            course_update["name"],
+            course_update["description"],
+            course_update["teacher_id"],
+            course_update["capacity"],
+            course_update["duration"],
+            course_id
+        ))
+        connection.commit()
+        return {"message": "Course updated successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/backend/school/deleteCourse")
+async def delete_course(course_id: int):
+    try:
+        delete_query = "DELETE FROM school_courses WHERE course_id = %s"
+        cursor.execute(delete_query, (course_id,))
+        connection.commit()
+        
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Course not found")
+            
+        return {"message": "Course deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/courses/{teacher_id}", response_model=List[dict])
+async def get_teacher_courses(teacher_id: int):
+    try:
+        cursor.execute("SELECT * FROM school_courses WHERE teacher_id = %s", (teacher_id,))
+        courses = cursor.fetchall()
+        
+        if not courses:
+            raise HTTPException(status_code=404, detail="No courses found for this teacher")
+        
+        return [
+            {
+                "course_id": course[0],
+                "name": course[1],
+                "description": course[2],
+                "teacher_id": course[3],
+                "capacity": course[4],
+                "duration": course[6]
+            } for course in courses
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/courses/{school_id}", response_model=List[dict])
+async def get_teacher_courses(school_id: int):
+    try:
+        cursor.execute("SELECT * FROM school_courses WHERE school_id = %s", (school_id,))
+        courses = cursor.fetchall()
+        
+        if not courses:
+            raise HTTPException(status_code=404, detail="No courses found for this teacher")
+        
+        return [
+            {
+                "course_id": course[0],
+                "name": course[1],
+                "description": course[2],
+                "teacher_id": course[3],
+                "capacity": course[4],
+                "duration": course[6]
+            } for course in courses
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+
+@app.post("/backend/school/addTeacher")
+async def add_teacher(request: Request):
+    try:
+        teacher = await request.json()
+        
+        # Check for required fields
+        required_keys = ["name", "email", "subject", "qualification", "experience", "department"]
+        for key in required_keys:
+            if key not in teacher:
+                raise HTTPException(status_code=400, detail=f"Missing required field: {key}")
+        
+        insert_query = """
+            INSERT INTO school_teachers (name, email, subject, qualification, experience, department) 
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """
+        cursor.execute(insert_query, (
+            teacher["name"],
+            teacher["email"],
+            teacher["subject"],
+            teacher["qualification"],
+            teacher["experience"],
+            teacher["department"]
+        ))
+        connection.commit()
+        return {"id": cursor.lastrowid}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/backend/school/viewTeacher")
+async def view_teacher(request: Request):
+    try:
+        teacher_id = request.query_params.get('teacher_id')
+        if not teacher_id:
+            raise HTTPException(status_code=400, detail="Missing teacher_id in query parameters")
+        
+        cursor.execute("SELECT * FROM school_teachers WHERE teacher_id = %s", (teacher_id,))
+        db_teacher = cursor.fetchone()
+        
+        if db_teacher is None:
+            raise HTTPException(status_code=404, detail="Teacher not found")
+        
+        teacher = {
+            "teacher_id": db_teacher[0],
+            "name": db_teacher[1],
+            "email": db_teacher[2],
+            "subject": db_teacher[3],
+            "qualification": db_teacher[4],
+            "experience": db_teacher[5],
+            "department": db_teacher[6]
+        }
+        
+        return teacher
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/backend/school/editTeacher")
+async def edit_teacher(request: Request):
+    try:
+        teacher_update = await request.json()
+        teacher_id = teacher_update["teacher_id"]
+
+        # Check if teacher exists
+        cursor.execute("SELECT 1 FROM school_teachers WHERE teacher_id = %s", (teacher_id,))
+        if cursor.fetchone() is None:
+            raise HTTPException(status_code=404, detail="Teacher not found")
+
+        update_query = """
+            UPDATE school_teachers SET 
+                name = %s,
+                email = %s,
+                subject = %s,
+                qualification = %s,
+                experience = %s,
+                department = %s
+            WHERE teacher_id = %s
+        """
+        cursor.execute(update_query, (
+            teacher_update["name"],
+            teacher_update["email"],
+            teacher_update["subject"],
+            teacher_update["qualification"],
+            teacher_update["experience"],
+            teacher_update["department"],
+            teacher_id
+        ))
+        connection.commit()
+        return {"message": "Teacher updated successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/backend/school/deleteTeacher")
+async def delete_teacher(teacher_id: int):
+    try:
+
+        cursor.execute("SELECT 1 FROM school_courses WHERE teacher_id = %s", (teacher_id,))
+        if cursor.fetchone() is not None:
+            raise HTTPException(
+                status_code=400, 
+                detail="Cannot delete teacher with associated courses. Please reassign or delete the courses first."
+            )
+
+        delete_query = "DELETE FROM school_teachers WHERE teacher_id = %s"
+        cursor.execute(delete_query, (teacher_id,))
+        connection.commit()
+        
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Teacher not found")
+            
+        return {"message": "Teacher deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/teachers/department/{department}", response_model=List[dict])
+async def get_department_teachers(department: str):
+    try:
+        cursor.execute("SELECT * FROM school_teachers WHERE department = %s", (department,))
+        teachers = cursor.fetchall()
+        
+        if not teachers:
+            raise HTTPException(status_code=404, detail="No teachers found in this department")
+        
+        return [
+            {
+                "teacher_id": teacher[0],
+                "name": teacher[1],
+                "email": teacher[2],
+                "subject": teacher[3],
+                "qualification": teacher[4],
+                "experience": teacher[5],
+                "department": teacher[6]
+            } for teacher in teachers
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+@app.get("/teachers", response_model=List[dict])
+async def get_all_teachers():
+    try:
+        cursor.execute("SELECT * FROM school_teachers")
+        teachers = cursor.fetchall()
+        
+        return [
+            {
+                "teacher_id": teacher[0],
+                "name": teacher[1],
+                "email": teacher[2],
+                "subject": teacher[3],
+                "qualification": teacher[4],
+                "experience": teacher[5],
+                "department": teacher[6]
+            } for teacher in teachers
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/backend/school/addLesson")
+async def add_lesson(request: Request):
+    try:
+        lesson = await request.json()
+        
+        required_keys = ["course_id", "title", "content", "duration", "resources"]
+        for key in required_keys:
+            if key not in lesson:
+                raise HTTPException(status_code=400, detail=f"Missing required field: {key}")
+        
+        if not lesson["title"].strip() or len(lesson["title"]) > 255:
+            raise HTTPException(
+                status_code=400,
+                detail="Title cannot be empty and must be less than 255 characters"
+            )
+        
+        duration = str(lesson["duration"]).lower().replace(' ', '')
+        if not (duration.endswith('hrs') or duration.endswith('hr')):
+            raise HTTPException(
+                status_code=400,
+                detail="Duration must be specified in hours (e.g., '6 hrs')"
+            )
+        
+        try:
+            hours = float(duration.rstrip('hrs').rstrip('hr'))
+            if hours <= 0 or hours > 24:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Duration must be between 0 and 24 hours"
+                )
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid duration format"
+            )
+        
+        if not isinstance(lesson["resources"], dict):
+            raise HTTPException(
+                status_code=400,
+                detail="Resources must be a JSON object"
+            )
+        
+        cursor.execute(
+            "SELECT 1 FROM school_courses WHERE course_id = %s",
+            (lesson["course_id"],)
+        )
+        if cursor.fetchone() is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Course with ID {lesson['course_id']} not found"
+            )
+        cursor.execute(
+            "SELECT 1 FROM school_lessons WHERE course_id = %s AND title = %s",
+            (lesson["course_id"], lesson["title"])
+        )
+        if cursor.fetchone():
+            raise HTTPException(
+                status_code=400,
+                detail="A lesson with this title already exists in this course"
+            )
+        
+        # Insert the lesson into the database
+        insert_query = """
+            INSERT INTO school_lessons 
+            (course_id, title, content, duration, resources, status, created_at, updated_at) 
+            VALUES (%s, %s, %s, %s, %s, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """
+        
+        # Convert resources to JSON string
+        resources_json = json.dumps(lesson["resources"])
+        
+        cursor.execute(insert_query, (
+            lesson["course_id"],
+            lesson["title"].strip(),
+            lesson["content"],
+            lesson["duration"],
+            resources_json,
+        ))
+        connection.commit()
+        
+        lesson_id = cursor.lastrowid
+        
+        return {
+            "lesson_id": lesson_id,
+            "message": "Lesson created successfully"
+        }
+        
+    except HTTPException as e:
+        raise e
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid JSON format in resources field"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"An error occurred while creating the lesson: {str(e)}"
+        )
+
+@app.get("/backend/school/viewLesson")
+async def view_lesson(lesson_id: int):
+    try:
+        cursor.execute("SELECT * FROM school_lessons WHERE lesson_id = %s", (lesson_id,))
+        db_lesson = cursor.fetchone()
+        
+        if db_lesson is None:
+            raise HTTPException(status_code=404, detail="Lesson not found")
+        
+        lesson = {
+            "lesson_id": db_lesson[0],
+            "course_id": db_lesson[1],
+            "title": db_lesson[2],
+            "content": db_lesson[3],
+            "duration": db_lesson[4],
+            "resources": db_lesson[5],
+            "status": db_lesson[6]
+        }
+        return lesson
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/backend/school/editLesson")
+async def edit_lesson(request: Request):
+    try:
+        lesson_update = await request.json()
+        lesson_id = lesson_update["lesson_id"]
+
+        cursor.execute("SELECT 1 FROM school_lessons WHERE lesson_id = %s", (lesson_id,))
+        if cursor.fetchone() is None:
+            raise HTTPException(status_code=404, detail="Lesson not found")
+
+        update_query = """
+            UPDATE school_lessons SET 
+                course_id = %s,
+                title = %s,
+                content = %s,
+                duration = %s,
+                resources = %s,
+                status = %s
+            WHERE lesson_id = %s
+        """
+
+        # Convert resources to JSON string
+        resources_json = json.dumps(lesson_update["resources"])
+
+        cursor.execute(update_query, (
+            lesson_update["course_id"],
+            lesson_update["title"],
+            lesson_update["content"],
+            lesson_update["duration"],
+            resources_json,
+            lesson_update["status"],
+            lesson_id
+        ))
+        connection.commit()
+        return {"message": "Lesson updated successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/backend/school/deleteLesson")
+async def delete_lesson(lesson_id: int):
+    try:
+        cursor.execute("SELECT 1 FROM school_presentations WHERE lesson_id = %s", (lesson_id,))
+        if cursor.fetchone() is not None:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot delete lesson with associated presentations. Please delete the presentations first."
+            )
+
+        delete_query = "DELETE FROM school_lessons WHERE lesson_id = %s"
+        cursor.execute(delete_query, (lesson_id,))
+        connection.commit()
+        
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Lesson not found")
+            
+        return {"message": "Lesson deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/backend/school/addPresentation")
+async def add_presentation(request: Request):
+    try:
+        presentation = await request.json()
+        
+        required_keys = ["lesson_id", "title", "content", "media_urls", "duration"]
+        for key in required_keys:
+            if key not in presentation:
+                raise HTTPException(status_code=400, detail=f"Missing required field: {key}")
+        
+        cursor.execute("SELECT 1 FROM school_lessons WHERE lesson_id = %s", (presentation["lesson_id"],))
+        if cursor.fetchone() is None:
+            raise HTTPException(status_code=400, detail="Invalid lesson_id")
+        
+        # Ensure media_urls is a valid JSON object
+        try:
+            media_urls_json = json.dumps(presentation["media_urls"])
+        except (TypeError, ValueError) as e:
+            raise HTTPException(status_code=400, detail="Invalid JSON format in media_urls field")
+        
+        insert_query = """
+            INSERT INTO school_presentations (lesson_id, title, content, media_urls, duration, status) 
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """
+        cursor.execute(insert_query, (
+            presentation["lesson_id"],
+            presentation["title"],
+            presentation["content"],
+            media_urls_json,
+            presentation["duration"],
+            "active"  # Default status
+        ))
+        connection.commit()
+        return {"presentation_id": cursor.lastrowid}
+    except HTTPException as e:
+        raise e
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid JSON format in media_urls field"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/backend/school/viewPresentation")
+async def view_presentation(presentation_id: int):
+    try:
+        cursor.execute("SELECT * FROM school_presentations WHERE presentation_id = %s", (presentation_id,))
+        db_presentation = cursor.fetchone()
+        
+        if db_presentation is None:
+            raise HTTPException(status_code=404, detail="Presentation not found")
+        
+        presentation = {
+            "presentation_id": db_presentation[0],
+            "lesson_id": db_presentation[1],
+            "title": db_presentation[2],
+            "content": db_presentation[3],
+            "media_urls": db_presentation[4],
+            "duration": db_presentation[5],
+            "status": db_presentation[6]
+        }
+        return presentation
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/backend/school/addPresentation")
+async def add_presentation(request: Request):
+    try:
+        presentation = await request.json()
+        
+        required_keys = ["lesson_id", "title", "content", "media_urls", "duration"]
+        for key in required_keys:
+            if key not in presentation:
+                raise HTTPException(status_code=400, detail=f"Missing required field: {key}")
+        
+        cursor.execute("SELECT 1 FROM school_lessons WHERE lesson_id = %s", (presentation["lesson_id"],))
+        if cursor.fetchone() is None:
+            raise HTTPException(status_code=400, detail="Invalid lesson_id")
+        
+        # Ensure media_urls is a valid JSON object
+        try:
+            media_urls_json = json.dumps(presentation["media_urls"])
+        except (TypeError, ValueError) as e:
+            raise HTTPException(status_code=400, detail="Invalid JSON format in media_urls field")
+        
+        insert_query = """
+            INSERT INTO school_presentations (lesson_id, title, content, media_urls, duration, status) 
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """
+        cursor.execute(insert_query, (
+            presentation["lesson_id"],
+            presentation["title"],
+            presentation["content"],
+            media_urls_json,
+            presentation["duration"],
+            "active"  # Default status
+        ))
+        connection.commit()
+        return {"presentation_id": cursor.lastrowid}
+    except HTTPException as e:
+        raise e
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid JSON format in media_urls field"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/backend/school/editPresentation")
+async def edit_presentation(request: Request):
+    try:
+        presentation_update = await request.json()
+        presentation_id = presentation_update["presentation_id"]
+
+        cursor.execute("SELECT 1 FROM school_presentations WHERE presentation_id = %s", (presentation_id,))
+        if cursor.fetchone() is None:
+            raise HTTPException(status_code=404, detail="Presentation not found")
+
+        cursor.execute("SELECT 1 FROM school_lessons WHERE lesson_id = %s", (presentation_update["lesson_id"],))
+        if cursor.fetchone() is None:
+            raise HTTPException(status_code=400, detail="Invalid lesson_id")
+
+        # Ensure media_urls is a valid JSON object
+        try:
+            media_urls_json = json.dumps(presentation_update["media_urls"])
+        except (TypeError, ValueError) as e:
+            raise HTTPException(status_code=400, detail="Invalid JSON format in media_urls field")
+
+        update_query = """
+            UPDATE school_presentations SET 
+                lesson_id = %s,
+                title = %s,
+                content = %s,
+                media_urls = %s,
+                duration = %s,
+                status = %s
+            WHERE presentation_id = %s
+        """
+        cursor.execute(update_query, (
+            presentation_update["lesson_id"],
+            presentation_update["title"],
+            presentation_update["content"],
+            media_urls_json,
+            presentation_update["duration"],
+            presentation_update["status"],
+            presentation_id
+        ))
+        connection.commit()
+        return {"message": "Presentation updated successfully"}
+    except HTTPException as e:
+        raise e
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid JSON format in media_urls field"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/backend/school/deletePresentation")
+async def delete_presentation(presentation_id: int):
+    try:
+        delete_query = "DELETE FROM school_presentations WHERE presentation_id = %s"
+        cursor.execute(delete_query, (presentation_id,))
+        connection.commit()
+        
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Presentation not found")
+            
+        return {"message": "Presentation deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/backend/school/addAssessment")
+async def add_assessment(request: Request):
+    try:
+        assessment = await request.json()
+        
+        # Check for required fields
+        required_keys = ["course_id", "title", "type", "questions", "total_marks", "duration"]
+        for key in required_keys:
+            if key not in assessment:
+                raise HTTPException(status_code=400, detail=f"Missing required field: {key}")
+        
+        cursor.execute("SELECT 1 FROM school_courses WHERE course_id = %s", (assessment["course_id"],))
+        if cursor.fetchone() is None:
+            raise HTTPException(status_code=400, detail="Invalid course_id")
+        
+        # Ensure questions is a valid JSON object
+        try:
+            questions_json = json.dumps(assessment["questions"])
+        except (TypeError, ValueError) as e:
+            raise HTTPException(status_code=400, detail="Invalid JSON format in questions field")
+        
+        insert_query = """
+            INSERT INTO school_assessments (course_id, title, type, questions, total_marks, duration, status) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """
+        cursor.execute(insert_query, (
+            assessment["course_id"],
+            assessment["title"],
+            assessment["type"],
+            questions_json,
+            assessment["total_marks"],
+            assessment["duration"],
+            "active"  # Default status
+        ))
+        connection.commit()
+        return {"assessment_id": cursor.lastrowid}
+    except HTTPException as e:
+        raise e
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid JSON format in questions field"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/backend/school/viewAssessment")
+async def view_assessment(assessment_id: int):
+    try:
+        cursor.execute("SELECT * FROM school_assessments WHERE assessment_id = %s", (assessment_id,))
+        db_assessment = cursor.fetchone()
+        
+        if db_assessment is None:
+            raise HTTPException(status_code=404, detail="Assessment not found")
+        
+        assessment = {
+            "assessment_id": db_assessment[0],
+            "course_id": db_assessment[1],
+            "title": db_assessment[2],
+            "type": db_assessment[3],
+            "questions": db_assessment[4],
+            "total_marks": db_assessment[5],
+            "status": db_assessment[6]
+        }
+        return assessment
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/backend/school/editAssessment")
+async def edit_assessment(request: Request):
+    try:
+        assessment_update = await request.json()
+        assessment_id = assessment_update["assessment_id"]
+
+        # Check if assessment exists
+        cursor.execute("SELECT 1 FROM school_assessments WHERE assessment_id = %s", (assessment_id,))
+        if cursor.fetchone() is None:
+            raise HTTPException(status_code=404, detail="Assessment not found")
+
+        # Ensure questions is a valid JSON object
+        try:
+            questions_json = json.dumps(assessment_update["questions"])
+        except (TypeError, ValueError) as e:
+            raise HTTPException(status_code=400, detail="Invalid JSON format in questions field")
+
+        update_query = """
+            UPDATE school_assessments SET 
+                course_id = %s,
+                title = %s,
+                type = %s,
+                questions = %s,
+                total_marks = %s,
+                duration = %s,
+                status = %s
+            WHERE assessment_id = %s
+        """
+        cursor.execute(update_query, (
+            assessment_update["course_id"],
+            assessment_update["title"],
+            assessment_update["type"],
+            questions_json,
+            assessment_update["total_marks"],
+            assessment_update["duration"],
+            assessment_update["status"],
+            assessment_id
+        ))
+        connection.commit()
+        return {"message": "Assessment updated successfully"}
+    except HTTPException as e:
+        raise e
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid JSON format in questions field"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/backend/school/deleteAssessment")
+async def delete_assessment(assessment_id: int):
+    try:
+        delete_query = "DELETE FROM school_assessments WHERE assessment_id = %s"
+        cursor.execute(delete_query, (assessment_id,))
+        connection.commit()
+        
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Assessment not found")
+            
+        return {"message": "Assessment deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+  
+    
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
