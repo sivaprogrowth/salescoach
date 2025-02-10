@@ -40,6 +40,8 @@ connection = mysql.connector.connect(
 sns_client = boto3.client('sns', region_name='ap-south-1')
 SNS_TOPIC_ARN = os.getenv('SNS_TOPIC_ARN') 
 SNS_TOPIC_TEXT_RAG_ARN = os.getenv('SNS_TOPIC_TEXT_RAG_ARN')
+SNS_TOPIC_VOICE_BOT_NEXT_QUESTION_ARN = os.getenv('SNS_TOPIC_VOICE_BOT_NEXT_QUESTION_ARN')
+SNS_TOPIC_CV_FEEDBACK_ARN = os.getenv('SNS_TOPIC_CV_FEEDBACK_ARN')
 # Glific API credentials
 GLIFIC_PHONE_NUMBER = os.getenv("GLIFIC_PHONE_NUMBER")
 GLIFIC_PASSWORD = os.getenv("GLIFIC_PASSWORD")
@@ -314,7 +316,7 @@ async def send_to_glific_api(flow_id: int, contact_id: int, result: str):
         graphql_variables = {
             "flowId":flow_id,
             "contactId":contact_id,
-            "result":f"{{\"result\":{{\"message\":\"{result}\"}}}}"
+            "result": json.dumps({"result": {"message": result}})
         }
         headers = {
             "authorization": f"{auth_token}",
@@ -489,7 +491,7 @@ async def sns_listener(request: Request):
         print(flow_id)
         print(contact_id)
         result  = await run_script(body['Message'],idx)
-        result = repr(result).strip("'\"")
+        # result = repr(result).strip("'\"")
         #result_formatted = repr(result).strip("'").replace("\\", "\\\\")
         response =  await send_to_glific_api(flow_id , contact_id,result)
         print("sent to glific successfully: ",response)
@@ -603,7 +605,7 @@ async def publish_to_sns_text_rag(request: Request):
         print(f"Failed to publish message to SNS: {error}")
         raise HTTPException(status_code=500, detail="Failed to send message to SNS")
     
-@app.post("/backend/snsTextRag")
+@app.post("/backend/snsTextRag",status_code=status.HTTP_200_OK)
 async def sns_listener_TextRag(request: Request):
     headers = request.headers
     message_type = headers.get("x-amz-sns-message-type")
@@ -639,7 +641,6 @@ async def sns_listener_TextRag(request: Request):
         print("idx ",idx)
         course_id = get_course_id_by_name(course_title)
         result  = await run_script(body['Message'],idx.split(".")[-2])
-        result = repr(result).strip("'\"")
         response =  await send_to_glific_api(flow_id , contact_id,result)
         print("sent to glific successfully: ",response)
         data = (
@@ -1186,6 +1187,222 @@ async def get_lesson_content_type(req:Request):
         raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+    
+@app.post("/backend/publishNextQuestion",status_code=status.HTTP_200_OK)
+async def publish_next_question(req: Request):
+    try:
+        data = await req.json()
+        user_id = data.get("user_id")
+        idx = "vmartethics"
+        sns_response = sns_client.publish(
+            TopicArn=SNS_TOPIC_VOICE_BOT_NEXT_QUESTION_ARN,
+            Message="",
+            MessageAttributes={
+                'user_id': {
+                    'DataType': 'String',
+                    'StringValue': str(user_id)
+                },
+                'idx': {
+                    'DataType': 'String',
+                    'StringValue': idx
+                },
+                'flow_id': {
+                    'DataType': 'Number',
+                    'StringValue': str(req['flow_id'])
+                },
+                'contact_id': {
+                    'DataType': 'Number',
+                    'StringValue': str(req['contact_id'])
+                }
+            }
+        )
+        print(f"Message sent to SNS, MessageId: {sns_response['MessageId']}")
+        return {"status": "Message sent to SNS successfully", "MessageId": sns_response['MessageId']}
+    
+    except (BotoCoreError, ClientError) as error:
+        print(f"Failed to publish message to SNS: {error}")
+        raise HTTPException(status_code=500, detail="Failed to send message to SNS")
+    
+@app.post("/backend/snsNextQuestion")
+async def sns_next_question(request: Request):
+    headers = request.headers
+    message_type = headers.get("x-amz-sns-message-type")
+
+    if not message_type:
+        raise HTTPException(status_code=400, detail="Invalid message type header")
+
+    body = await request.json()
+
+    # Check if it's a SubscriptionConfirmation message
+    if message_type == "SubscriptionConfirmation" and body['SubscribeURL']:
+        # Confirm the subscription
+        response = requests.get(body['SubscribeURL'])
+        if response.status_code == 200:
+            print("Subscription confirmed.")
+        else:
+            print("Failed to confirm subscription.")
+        return {"status": "Subscription confirmation handled"}
+
+    # Handle Notification message
+    elif message_type == "Notification":
+        # Retrieve contactId and flowId from MessageAttributes
+        message_attributes = body['MessageAttributes'] or {}
+        contact_id = message_attributes.get('contactId', {}).get('Value')
+        user_id = message_attributes.get('user_id', {}).get('Value')
+        flow_id = message_attributes.get('flowId', {}).get('Value')
+        idx = message_attributes.get('idx', {}).get('Value')
+        result = get_next_question_service(user_id,idx)
+        # result = repr(result).strip("'\"")
+        #result_formatted = repr(result).strip("'").replace("\\", "\\\\")
+        response =  await send_to_glific_api(flow_id , contact_id,result)
+        print("sent to glific successfully: ",response)
+    # If unknown message type, return 400 error
+    else:
+        raise HTTPException(status_code=400, detail="Unknown message type")
+    
+@app.post("/backend/publishSubmitAnswer",status_code=status.HTTP_200_OK)
+async def publish_submit_answer(req: Request):
+    try:
+        data = await req.json()
+        user_response = data.get("user_response")
+        user_id = data.get("user_id")
+        qna_id = data.get("qna_id")
+        idx = data.get("idx")
+        sns_response = sns_client.publish(
+            TopicArn=SNS_TOPIC_VOICE_BOT_NEXT_QUESTION_ARN,
+            Message="",
+            MessageAttributes={
+                'user_id': {
+                    'DataType': 'String',
+                    'StringValue': str(user_id)
+                },
+                'idx': {
+                    'DataType': 'String',
+                    'StringValue': idx
+                },
+                'flow_id': {
+                    'DataType': 'Number',
+                    'StringValue': str(req['flow_id'])
+                },
+                'contact_id': {
+                    'DataType': 'Number',
+                    'StringValue': str(req['contact_id'])
+                }
+            }
+        )
+        print(f"Message sent to SNS, MessageId: {sns_response['MessageId']}")
+        return {"status": "Message sent to SNS successfully", "MessageId": sns_response['MessageId']}
+    
+    except (BotoCoreError, ClientError) as error:
+        print(f"Failed to publish message to SNS: {error}")
+        raise HTTPException(status_code=500, detail="Failed to send message to SNS")
+    
+@app.post("/backend/snsSubmitAnswer")
+async def sns_submit_answer(request: Request):
+    headers = request.headers
+    message_type = headers.get("x-amz-sns-message-type")
+
+    if not message_type:
+        raise HTTPException(status_code=400, detail="Invalid message type header")
+
+    body = await request.json()
+
+    # Check if it's a SubscriptionConfirmation message
+    if message_type == "SubscriptionConfirmation" and body['SubscribeURL']:
+        # Confirm the subscription
+        response = requests.get(body['SubscribeURL'])
+        if response.status_code == 200:
+            print("Subscription confirmed.")
+        else:
+            print("Failed to confirm subscription.")
+        return {"status": "Subscription confirmation handled"}
+
+    # Handle Notification message
+    elif message_type == "Notification":
+        # Retrieve contactId and flowId from MessageAttributes
+        message_attributes = body['MessageAttributes'] or {}
+        contact_id = message_attributes.get('contactId', {}).get('Value')
+        user_id = message_attributes.get('user_id', {}).get('Value')
+        flow_id = message_attributes.get('flowId', {}).get('Value')
+        idx = message_attributes.get('idx', {}).get('Value')
+        result = get_next_question_service(user_id,idx)
+        # result = repr(result).strip("'\"")
+        #result_formatted = repr(result).strip("'").replace("\\", "\\\\")
+        response =  await send_to_glific_api(flow_id , contact_id,result)
+        print("sent to glific successfully: ",response)
+    # If unknown message type, return 400 error
+    else:
+        raise HTTPException(status_code=400, detail="Unknown message type")
+    
+@app.post("/backend/publishCV",status_code=status.HTTP_200_OK)
+async def publish_next_question(req: Request):
+    try:
+        data = await req.json()
+        pdf_url = data.get("result")
+        flow_id = data.get("flow_id")
+        contact_id = data.get("contact_id")
+        sns_response = sns_client.publish(
+            TopicArn=SNS_TOPIC_CV_FEEDBACK_ARN,
+            Message="CV Feedback",
+            MessageAttributes={
+                'pdf_url': {
+                    'DataType': 'String',
+                    'StringValue': pdf_url
+                },
+                'flow_Id': {
+                    'DataType': 'Number',
+                    'StringValue': flow_id
+                },
+                'contact_Id': {
+                    'DataType': 'Number',
+                    'StringValue': contact_id
+                }
+            }
+        )
+        print(f"Message sent to SNS, MessageId: {sns_response['MessageId']}")
+        return {"status": "Message sent to SNS successfully", "MessageId": sns_response['MessageId']}
+    
+    except (BotoCoreError, ClientError) as error:
+        print(f"Failed to publish message to SNS: {error}")
+        raise HTTPException(status_code=500, detail="Failed to send message to SNS")
+    
+@app.post("/backend/snsCVFeedback", status_code=status.HTTP_200_OK)
+async def sns_next_question(request: Request):
+    headers = request.headers
+    message_type = headers.get("x-amz-sns-message-type")
+
+    if not message_type:
+        raise HTTPException(status_code=400, detail="Invalid message type header")
+
+    body = await request.json()
+
+    # Check if it's a SubscriptionConfirmation message
+    if message_type == "SubscriptionConfirmation" and body['SubscribeURL']:
+        # Confirm the subscription
+        response = requests.get(body['SubscribeURL'])
+        if response.status_code == 200:
+            print("Subscription confirmed.")
+        else:
+            print("Failed to confirm subscription.")
+        return {"status": "Subscription confirmation handled"}
+
+    # Handle Notification message
+    elif message_type == "Notification":
+        # Retrieve contactId and flowId from MessageAttributes
+        message_attributes = body['MessageAttributes'] or {}
+        contact_id = message_attributes.get('contact_Id', {}).get('Value')
+        pdf_url = message_attributes.get('pdf_url', {}).get('Value')
+        flow_id = message_attributes.get('flow_Id', {}).get('Value')
+        result = get_cv_feedback(pdf_url)
+        # result = "ok"
+        # result = repr(result).strip("'\"")
+        print(result)
+        #result_formatted = repr(result).strip("'").replace("\\", "\\\\")
+        response =  await send_to_glific_api(flow_id , contact_id,result)
+        print("sent to glific successfully: ",response)
+    # If unknown message type, return 400 error
+    else:
+        raise HTTPException(status_code=400, detail="Unknown message type")
 
 if __name__ == "__main__":
     import uvicorn

@@ -9,6 +9,7 @@ import json
 import wave
 import fitz
 import boto3
+import tempfile
 from botocore.exceptions import BotoCoreError, ClientError
 import mimetypes
 from io import StringIO
@@ -389,3 +390,61 @@ def save_mp3_file(filename, audio_data, sample_rate=22050, num_channels=1):
     
     # Export the audio segment as an MP3 file
     audio_segment.export(filename, format="mp3")
+
+def download_pdf_from_url(pdf_url):
+    try:
+        response = requests.get(pdf_url, stream=True)
+        if response.status_code != 200:
+            raise Exception(f"Failed to download PDF. Status code: {response.status_code}")
+
+        return response.content  # Return raw PDF content
+
+    except Exception as e:
+        print(f"Error downloading PDF: {str(e)}")
+        return None
+
+def classify_sections_gpt(cv_text):
+
+    function_schema = {
+        "name": "extract_cv_sections",
+        "description": "Extracts different sections from a resume and categorizes them into structured data.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "Header": {"type": "string", "description": "Name, email, phone number, LinkedIn profile"},
+                "Summary": {"type": "string", "description": "Professional summary or objective statement"},
+                "Education": {"type": "string", "description": "Educational background including institutions and degrees"},
+                "Experience": {"type": "string", "description": "Work experience with job titles, companies, and years"},
+                "Skills": {"type": "string", "description": "List of relevant skills"},
+                "Certifications": {"type": "string", "description": "Certifications, awards, and achievements"},
+                "Projects": {"type": "string", "description": "Personal or professional projects"},
+                "Additional_Info": {"type": "string", "description": "Other relevant details (languages, volunteer work, etc.)"}
+            },
+            "required": ["Header", "Education", "Experience", "Skills"]
+        }
+    }
+
+    response = client.chat.completions.create(
+        model="gpt-4-turbo",
+        messages=[
+            {"role": "system", "content": "You are an AI expert at analyzing CVs."},
+            {"role": "user", "content": f"Extract and categorize the following CV text:\n\n{cv_text}"}
+        ],
+        functions=[function_schema],  # Fix: Pass as a list
+        function_call={"name": "extract_cv_sections"}  # Fix: Explicit function call
+    )
+
+    extracted_sections = json.loads(response.choices[0].message.function_call.arguments)
+    return extracted_sections
+
+def analyze_cv_with_gpt(text, prompt):
+    
+    response = client.chat.completions.create(
+        model="gpt-4-turbo",
+        messages=[
+            {"role": "system", "content": f"You are an expert CV reviewer. {prompt}"},
+            {"role": "user", "content": text}
+        ]
+    )
+
+    return response.choices[0].message.content.strip()

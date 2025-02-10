@@ -955,7 +955,7 @@ def initialize_progress_qna_service(user_id,idx):
 
 def get_next_question_service(user_id , idx):
     query = """
-        SELECT q.question , q.id
+        SELECT q.audio_link , q.question, q.id
         FROM qna q
         JOIN user_qna_progress uqp ON q.id = uqp.qna_id
         WHERE uqp.user_id = %s AND uqp.idx = %s AND uqp.is_answered = 0
@@ -966,21 +966,10 @@ def get_next_question_service(user_id , idx):
     next_question = db.fetchone()
     if not next_question:
         return {"message": "No unanswered questions found."}
-    question = next_question[0]   
-    print("The Question is : ",question) 
-    current_datetime = datetime.now()
-    datetime_string = current_datetime.strftime("%Y%m%d%H%M%S")
-    file_name = f"output_{datetime_string}.mp3"
-    print(f"Saving audio data to {file_name}...")
-    audio_data = speak(question)
-    save_mp3_file(file_name, audio_data)
-    audio_url = upload_audio_to_s3(file_name)
-    print(f"Audio file uploaded to S3. URL: {audio_url}")
-    
-    # Remove the local file after uploading
-    print(f"Removing local file {file_name}...")
-    os.remove(file_name)
-    return {'audio_url': audio_url, 'message':next_question[0], "qna_id":next_question[1]}
+    audio_url = next_question[0]
+    question = next_question[1]   
+    qna_id = next_question[2]
+    return {'audio_url': audio_url, 'message':question, "qna_id":qna_id}
 
 def submit_answer_service(user_response,user_id,qna_id):
     try:
@@ -1016,3 +1005,41 @@ def get_lesson_content_type_service(lesson_id: int):
 
 
 
+def get_cv_feedback(pdf_url):
+    
+    pdf_stream = download_pdf_from_url(pdf_url)
+    cv_text = extract_text_from_pdf(pdf_stream)
+    sections = classify_sections_gpt(cv_text)
+
+    # Define aspect-specific text mappings
+    aspect_text_mapping = {
+        "Clarity": cv_text,  
+        "Professional Summary": sections.get("Summary", ""),
+        "Skills & Work Experience": "\n".join([
+            sections.get("Experience", ""), 
+            sections.get("Projects", ""), 
+            sections.get("Certifications", "")
+        ]),
+        "Formatting of the Document": cv_text,  
+        "Minor Points": cv_text  
+    }
+
+    # Define aspect-specific prompts
+    aspect_prompts = {
+        "Clarity": "Analyze the clarity of the following CV text. Identify any ambiguous or unclear sections and suggest improvements. Give the output in 50 words only",
+        "Professional Summary": "Evaluate the professional summary of this CV. Is it concise, impactful, and relevant? Suggest improvements if necessary.Give the output in 50 words only",
+        "Skills & Work Experience": "Analyze the skills and work experience sections of this CV. Identify missing details, redundancies, or areas for enhancement.Give the output in 50 words only",
+        "Formatting of the Document": "Review the formatting of this CV. Is it structured well, visually appealing, and professional? Suggest improvements.Give the output in 50 words only",
+        "Minor Points": "Check for minor issues in this CV, such as typos, inconsistencies, missing details, or unnecessary information.Give the output in 50 words only"
+    }
+
+    feedback = {}
+
+    for aspect, text in aspect_text_mapping.items():
+        prompt = aspect_prompts.get(aspect, "Analyze the following CV section and provide feedback.")
+        feedback[aspect] = analyze_cv_with_gpt(text, prompt)  # Pass both text and prompt
+
+    # Formatting the consolidated feedback
+    consolidated_feedback = "\n\n".join([f"**{key}**:\n{value}" for key, value in feedback.items()])
+    
+    return consolidated_feedback
