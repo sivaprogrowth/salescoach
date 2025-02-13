@@ -1191,94 +1191,143 @@ async def get_lesson_content_type(req:Request):
 
 @app.post("/backend/addSchool")
 async def add_school(request: Request):
-        school = await request.json()
-        insert_query = """
-            INSERT INTO schools (school_type, company_id, name, email, city, state, description, country) 
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """
+    school = await request.json()
+    insert_query = """
+        INSERT INTO schools (
+            school_name, school_type, education_board, company_id, 
+            principal_name, established_year, student_capacity, name, 
+            phone, website, email, street_address, city, state, 
+            description, zipcode, country
+        ) 
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """
+    try:
         cursor.execute(insert_query, (
-            school["school_type"], 
-            school["company_id"], 
-            school["name"], 
-            school["email"], 
-            school["city"], 
-            school["state"], 
-            school["description"], 
+            school["school_name"],
+            school["school_type"],
+            school.get("education_board"),
+            school["company_id"],
+            school.get("principal_name"),
+            school.get("established_year"),
+            school["student_capacity"],
+            school["name"],
+            school["phone"],
+            school["website"],
+            school["email"],
+            school["street_address"],
+            school["city"],
+            school["state"],
+            school["description"],
+            school["zipcode"],
             school["country"]
         ))
         connection.commit()
         return {"school_id": cursor.lastrowid}
+    except Exception as e:
+        connection.rollback()  # Rollback in case of error
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/backend/viewSchool")
 async def view_school(request: Request):
-        try:
-            school_id = request.query_params.get('school_id')
-            if not school_id:
-                raise HTTPException(status_code=400, detail="Missing school_id in query parameters")
-            
-            cursor.execute("SELECT * FROM schools WHERE school_id = %s", (school_id,))
-            db_school = cursor.fetchone()
-            
-            if db_school is None:
-                raise HTTPException(status_code=404, detail="School not found")
-            
-            school = {
-                "school_id": db_school[0],
-                "school_type": db_school[1],
-                "company_id": db_school[2],
-                "name": db_school[3],
-                "email": db_school[4],
-                "city": db_school[5],
-                "state": db_school[6],
-                "description": db_school[7],
-                "country": db_school[8]
-            }
-            
-            return school
+    try:
+        school_id = request.query_params.get('school_id')
+        if not school_id:
+            raise HTTPException(status_code=400, detail="Missing school_id in query parameters")
         
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+        cursor.execute("SELECT * FROM schools WHERE school_id = %s", (school_id,))
+        db_school = cursor.fetchone()
+        
+        if db_school is None:
+            raise HTTPException(status_code=404, detail="School not found")
+        
+        school = {
+            "school_id": db_school[0],
+            "school_name": db_school[1],
+            "school_type": db_school[2],
+            "education_board": db_school[3],
+            "company_id": db_school[4],
+            "principal_name": db_school[5],
+            "established_year": db_school[6],
+            "student_capacity": db_school[7],
+            "name": db_school[8],
+            "phone": db_school[9],
+            "website": db_school[10],
+            "email": db_school[11],
+            "street_address": db_school[12],
+            "city": db_school[13],
+            "state": db_school[14],
+            "description": db_school[15],
+            "zipcode": db_school[16],
+            "country": db_school[17]
+        }
+        
+        return school
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/backend/editSchool")
 async def edit_school(request: Request):
-        school_update = await request.json()
-        school_id = school_update["school_id"]
-        update_query = """
-            UPDATE schools SET 
-                school_type = %s, 
-                company_id = %s, 
-                name = %s, 
-                email = %s, 
-                city = %s, 
-                state = %s, 
-                description = %s, 
-                country = %s 
-            WHERE school_id = %s
-        """
-        cursor.execute(update_query, (
-            school_update["school_type"], 
-            school_update["company_id"], 
-            school_update["name"], 
-            school_update["email"], 
-            school_update["city"], 
-            school_update["state"], 
-            school_update["description"], 
-            school_update["country"],
-            school_id
-        ))
-        connection.commit()
-        if cursor.rowcount == 0:
-            raise HTTPException(status_code=404, detail="School not found")
-        return {"message": "School updated successfully"}
+    school_update = await request.json()
+    school_id = school_update["school_id"]
+    update_query = """
+        UPDATE schools SET 
+            school_name = %s,
+            school_type = %s, 
+            education_board = %s,
+            company_id = %s, 
+            principal_name = %s,
+            established_year = %s,
+            student_capacity = %s,
+            name = %s, 
+            phone = %s, 
+            website = %s,
+            email = %s, 
+            street_address = %s, 
+            city = %s, 
+            state = %s, 
+            description = %s, 
+            zipcode = %s, 
+            country = %s 
+        WHERE school_id = %s
+    """
+    cursor.execute(update_query, (
+        school_update["school_name"],
+        school_update["school_type"], 
+        school_update["education_board"],
+        school_update["company_id"], 
+        school_update["principal_name"],
+        school_update["established_year"],
+        school_update["student_capacity"],
+        school_update["name"], 
+        school_update["phone"], 
+        school_update["website"],
+        school_update["email"], 
+        school_update["street_address"], 
+        school_update["city"], 
+        school_update["state"], 
+        school_update["description"], 
+        school_update["zipcode"], 
+        school_update["country"],
+        school_id
+    ))
+    connection.commit()
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail="School not found")
+    return {"message": "School updated successfully"}
 
 @app.delete("/backend/deleteSchool")
-async def delete_school(school_id: int):
-        delete_query = "DELETE FROM schools WHERE school_id = %s"
-        cursor.execute(delete_query, (school_id,))
-        connection.commit()
-        if cursor.rowcount == 0:
-            raise HTTPException(status_code=404, detail="School not found")
-        return {"message": "School deleted successfully"}
+async def delete_school(request: Request):
+    school_id = request.query_params.get('school_id')
+    if not school_id:
+        raise HTTPException(status_code=400, detail="Missing school_id in query parameters")
+    
+    delete_query = "DELETE FROM schools WHERE school_id = %s"
+    cursor.execute(delete_query, (school_id,))
+    connection.commit()
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail="School not found")
+    return {"message": "School deleted successfully"}
 
 @app.post("/backend/addGrades")
 async def add_grades(request: Request):
@@ -1376,26 +1425,41 @@ async def delete_grades(grade_id: int):
             raise HTTPException(status_code=404, detail="Grade not found")
         return {"message": "Grade deleted successfully"}
 
-@app.get("/schools/{company_id}", response_model=List[dict])
-async def get_schools(company_id: int):
+@app.get("/backend/viewAllSchools/{company_id}", response_model=List[dict])
+async def view_all_schools(company_id: int):
+    try:
         cursor.execute("SELECT * FROM schools WHERE company_id = %s", (company_id,))
         schools = cursor.fetchall()
+        
         if not schools:
             raise HTTPException(status_code=404, detail="No schools found for this company ID")
         
         return [
             {
                 "school_id": school[0],
-                "school_type": school[1],
-                "company_id": school[2],
-                "name": school[3],
-                "email": school[4],
-                "city": school[5],
-                "state": school[6],
-                "description": school[7],
-                "country": school[8]
+                "school_name": school[1],
+                "school_type": school[2],
+                "education_board": school[3],
+                "company_id": school[4],
+                "principal_name": school[5],
+                "established_year": school[6],
+                "student_capacity": school[7],
+                "name": school[8],
+                "phone": school[9],
+                "website": school[10],
+                "email": school[11],
+                "street_address": school[12],
+                "city": school[13],
+                "state": school[14],
+                "description": school[15],
+                "zipcode": school[16],
+                "country": school[17]
             } for school in schools
         ]
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @app.post("/backend/school/addCourse")
