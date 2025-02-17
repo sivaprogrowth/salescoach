@@ -1321,14 +1321,67 @@ async def delete_school(request: Request):
     school_id = request.query_params.get('school_id')
     if not school_id:
         raise HTTPException(status_code=400, detail="Missing school_id in query parameters")
-    
-    delete_query = "DELETE FROM schools WHERE school_id = %s"
-    cursor.execute(delete_query, (school_id,))
-    connection.commit()
-    if cursor.rowcount == 0:
-        raise HTTPException(status_code=404, detail="School not found")
-    return {"message": "School deleted successfully"}
 
+    try:
+       
+        cursor.execute("""
+            DELETE FROM school_assessments 
+            WHERE course_id IN (
+                SELECT course_id FROM school_courses WHERE school_id = %s
+            )
+        """, (school_id,))
+        connection.commit()
+
+        
+        cursor.execute("""
+            DELETE FROM school_presentations 
+            WHERE lesson_id IN (
+                SELECT lesson_id FROM school_lessons WHERE course_id IN (
+                    SELECT course_id FROM school_courses WHERE school_id = %s
+                )
+            )
+        """, (school_id,))
+        connection.commit()
+
+        
+        cursor.execute("""
+            DELETE FROM school_lessons 
+            WHERE course_id IN (
+                SELECT course_id FROM school_courses WHERE school_id = %s
+            )
+        """, (school_id,))
+        connection.commit()
+
+        
+        cursor.execute("DELETE FROM school_courses WHERE school_id = %s", (school_id,))
+        connection.commit()
+
+        
+        cursor.execute("DELETE FROM grades WHERE school_id = %s", (school_id,))
+        connection.commit()
+
+        
+        cursor.execute("""
+            DELETE FROM school_teachers 
+            WHERE teacher_id IN (
+                SELECT teacher_id FROM school_courses WHERE school_id = %s
+            )
+        """, (school_id,))
+        connection.commit()
+
+       
+        delete_query = "DELETE FROM schools WHERE school_id = %s"
+        cursor.execute(delete_query, (school_id,))
+        connection.commit()
+
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="School not found")
+
+        return {"message": "School and all related records deleted successfully"}
+    except Exception as e:
+        connection.rollback() 
+        raise HTTPException(status_code=500, detail=str(e))
+    
 @app.post("/backend/addGrades")
 async def add_grades(request: Request):
     try:
@@ -2253,8 +2306,49 @@ async def delete_assessment(assessment_id: int):
         return {"message": "Assessment deleted successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/backend/dashboard")
+async def get_dashboard():
+    try:
+
+        cursor.execute("SELECT COUNT(*) FROM schools")
+        total_schools = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM school_teachers")
+        total_teachers = cursor.fetchone()[0]
+
+        cursor.execute("SELECT COUNT(*) FROM school_courses")
+        total_courses = cursor.fetchone()[0]
+
+        cursor.execute("SELECT SUM(student_capacity) FROM schools")
+        total_students = cursor.fetchone()[0] or 0
+
+        cursor.execute("SELECT city, COUNT(*) FROM schools GROUP BY city")
+        region_wise_users = [
+            {"city": city, "count": count} for city, count in cursor.fetchall()
+        ]
+
+        #cursor.execute("SELECT AVG(performance) FROM school_teachers")
+        #teacher_completion_rate = round(cursor.fetchone()[0] or 0)
+
+
+       # cursor.execute("SELECT name, performance FROM school_teachers ORDER BY performance DESC LIMIT 4")
+        #top_teachers = [
+       #    {"name": name, "performance": performance} for name, performance in cursor.fetchall()]
+        
+
+        return {
+            "total_schools": total_schools,
+            "total_teachers": total_teachers,
+            "total_courses": total_courses,
+            "total_students": total_students,
+            "region_wise_users": region_wise_users
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
   
     
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)

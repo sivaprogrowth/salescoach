@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, Form , status, Request
 from fastapi.responses import FileResponse , JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-import scipy.io.wavfile as wavfile  # To save audio in .wav format
+import scipy.io.wavfile as wavfile
 from openai import OpenAI
 from util import *
 import torch
@@ -275,8 +275,6 @@ async def upload_file(req: Request):
     addToChat(type = 'AI',message = reply)
     return {'status_code':status.HTTP_200_OK,'chat':chats}
 
-
-
 @app.post("/start-recording")
 def start_recording_endpoint():
     start_recording()
@@ -295,8 +293,6 @@ async def stop_recording_endpoint(req : Request):
     print(qna)
     saveQnA(qna,index)
     return{'status_code':status.HTTP_200_OK}
-
-
 
 if __name__ == "__main__":
     import uvicorn
