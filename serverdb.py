@@ -1098,7 +1098,7 @@ async def add_feedback(req: Request):
         )
 
 @app.post("/backend/dashboard",status_code=status.HTTP_200_OK)
-async def dashboard(req:Request):
+async def dashboard(req : Request):
     try:
         data = await req.json()
         company_id = data["company_id"]
@@ -1512,6 +1512,7 @@ async def view_all_schools(company_id: int):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 
@@ -2307,7 +2308,7 @@ async def delete_assessment(assessment_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
-@app.get("/backend/dashboard")
+@app.get("/backend/dashboard/{company_id}")
 async def get_dashboard():
     try:
 
