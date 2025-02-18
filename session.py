@@ -1,9 +1,9 @@
-from langchain.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 from langchain.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationChain
-from langchain.callbacks import get_openai_callback
+from langchain.callbacks.openai_info import OpenAICallbackHandler
 from fastapi import FastAPI, UploadFile, File, Form
 import shutil
 import tempfile
@@ -29,7 +29,6 @@ class SessionManager:
                 database=os.getenv('DATABASE'),
                 password=os.getenv('PASSWD')
             )
-            self.cursor = self.connection.cursor(dictionary=True)
         except mysql.connector.Error as err:
             raise HTTPException(status_code=500, detail=f"Database connection failed: {err}")
 
@@ -46,22 +45,24 @@ class SessionManager:
     def get_or_create_session(self, session_id: Optional[str] = None) -> Dict[str, Any]:
         if not session_id:
             session_id = self.generate_session_id()
-            
-        query = "SELECT * FROM sessions WHERE session_id = %s"
-        self.cursor.execute(query, (session_id,))
-        session = self.cursor.fetchone()
+        
+        with self.connection.cursor(dictionary=True) as cursor:
+            query = "SELECT * FROM sessions WHERE session_id = %s"
+            cursor.execute(query, (session_id,))
+            session = cursor.fetchone()
         
         if not session:
             session_id = self.generate_session_id()
-            query = "INSERT INTO sessions (session_id, created_at) VALUES (%s, %s)"
-            self.cursor.execute(query, (session_id, datetime.now()))
-            self.connection.commit()
-            
+            with self.connection.cursor() as cursor:
+                query = "INSERT INTO sessions (session_id, created_at) VALUES (%s, %s)"
+                cursor.execute(query, (session_id, datetime.now()))
+                self.connection.commit()
+        
         memory = ConversationBufferMemory(return_messages=True, memory_key="history")
         
         if session:
             self.load_session_history(session_id, memory)
-            
+        
         return {"session": {"session_id": session_id}, "memory": memory}
         
     def process_pdf(self, file_path: str) -> str:
@@ -84,12 +85,12 @@ class SessionManager:
             
             chain = ConversationChain(llm=self.llm, memory=memory, verbose=True)
             
-            with get_openai_callback() as cb:
-                response = chain.run(processed_input)
+            callback = OpenAICallbackHandler()
+            response = chain.run(processed_input, callbacks=[callback])
             
-            self.store_in_history(session_id, processed_input, response, cb.total_tokens)
+            self.store_in_history(session_id, processed_input, response, callback.total_tokens)
             
-            return {"session_id": session_id, "response": response, "tokens_used": cb.total_tokens}
+            return {"session_id": session_id, "response": response, "tokens_used": callback.total_tokens}
             
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Message processing failed: {str(e)}")
@@ -100,8 +101,9 @@ class SessionManager:
         (session_id, input_text, response, tokens_used, timestamp)
         VALUES (%s, %s, %s, %s, %s)
         """
-        self.cursor.execute(query, (session_id, input_text, response, tokens, datetime.now()))
-        self.connection.commit()
+        with self.connection.cursor() as cursor:
+            cursor.execute(query, (session_id, input_text, response, tokens, datetime.now()))
+            self.connection.commit()
 
     def load_session_history(self, session_id: str, memory: ConversationBufferMemory):
         query = """
@@ -110,15 +112,14 @@ class SessionManager:
         WHERE session_id = %s 
         ORDER BY timestamp ASC
         """
-        self.cursor.execute(query, (session_id,))
-        history = self.cursor.fetchall()
+        with self.connection.cursor(dictionary=True) as cursor:
+            cursor.execute(query, (session_id,))
+            history = cursor.fetchall()
         
         for interaction in history:
             memory.save_context({"input": interaction["input_text"]}, {"output": interaction["response"]})
 
     def __del__(self):
-        if hasattr(self, 'cursor'):
-            self.cursor.close()
         if hasattr(self, 'connection'):
             self.connection.close()
 
@@ -156,8 +157,9 @@ async def get_history(session_id: str):
         WHERE session_id = %s 
         ORDER BY timestamp ASC
         """
-        session.cursor.execute(query, (session_id,))
-        history = session.cursor.fetchall()
+        with session.connection.cursor(dictionary=True) as cursor:
+            cursor.execute(query, (session_id,))
+            history = cursor.fetchall()
         return {"session_id": session_id, "history": history}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Fetching history failed: {str(e)}")
