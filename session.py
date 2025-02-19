@@ -152,7 +152,7 @@ async def process_pdf(file: UploadFile = File(...), session_id: Optional[str] = 
 async def get_history(session_id: str):
     try:
         query = """
-        SELECT input_text, response, timestamp 
+        SELECT input_text, response, timestamp m
         FROM message_history 
         WHERE session_id = %s 
         ORDER BY timestamp ASC

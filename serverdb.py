@@ -1189,7 +1189,7 @@ async def get_lesson_content_type(req:Request):
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
     
 
-@app.post("/backend/addSchool")
+@app.post("/backend/addSchool",status_code=status.HTTP_201_CREATED)
 async def add_school(request: Request):
     school = await request.json()
     insert_query = """
@@ -1227,10 +1227,10 @@ async def add_school(request: Request):
         connection.rollback()  # Rollback in case of error
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/backend/viewSchool")
-async def view_school(request: Request):
+@app.get("/backend/viewSchool/{school_id}")
+async def view_school(school_id: int):
     try:
-        school_id = request.query_params.get('school_id')
+        
         if not school_id:
             raise HTTPException(status_code=400, detail="Missing school_id in query parameters")
         
@@ -2349,6 +2349,9 @@ async def get_dashboard():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
   
+@app.get("/backend/health",status_code=status.HTTP_200_OK)
+def healthcheck():
+    return {"message":"Its working fine"}
     
 if __name__ == "__main__":
     import uvicorn
