@@ -1362,7 +1362,7 @@ async def delete_school(request: Request):
 
         
         cursor.execute("""
-            DELETE FROM school_teachers 
+            DELETE FROM teacher 
             WHERE teacher_id IN (
                 SELECT teacher_id FROM school_courses WHERE school_id = %s
             )
@@ -1419,7 +1419,6 @@ async def add_grades(request: Request):
     except HTTPException as e:
         return {"error": str(e)}
     except Exception as e:
-        # Catch any other exceptions and return an error message
         return {"error": f"An unexpected error occurred: {str(e)}"}
     
 @app.get("/backend/viewGrades")
@@ -1672,7 +1671,7 @@ async def add_teacher(request: Request):
                 raise HTTPException(status_code=400, detail=f"Missing required field: {key}")
         
         insert_query = """
-            INSERT INTO school_teachers (name, email, subject, qualification, experience, department) 
+            INSERT INTO teacher (name, email, subject, qualification, experience, department) 
             VALUES (%s, %s, %s, %s, %s, %s)
         """
         cursor.execute(insert_query, (
@@ -1695,7 +1694,7 @@ async def view_teacher(request: Request):
         if not teacher_id:
             raise HTTPException(status_code=400, detail="Missing teacher_id in query parameters")
         
-        cursor.execute("SELECT * FROM school_teachers WHERE teacher_id = %s", (teacher_id,))
+        cursor.execute("SELECT * FROM teacher WHERE teacher_id = %s", (teacher_id,))
         db_teacher = cursor.fetchone()
         
         if db_teacher is None:
@@ -1722,12 +1721,12 @@ async def edit_teacher(request: Request):
         teacher_id = teacher_update["teacher_id"]
 
         # Check if teacher exists
-        cursor.execute("SELECT 1 FROM school_teachers WHERE teacher_id = %s", (teacher_id,))
+        cursor.execute("SELECT 1 FROM teacher WHERE teacher_id = %s", (teacher_id,))
         if cursor.fetchone() is None:
             raise HTTPException(status_code=404, detail="Teacher not found")
 
         update_query = """
-            UPDATE school_teachers SET 
+            UPDATE teacher SET 
                 name = %s,
                 email = %s,
                 subject = %s,
@@ -1761,7 +1760,7 @@ async def delete_teacher(teacher_id: int):
                 detail="Cannot delete teacher with associated courses. Please reassign or delete the courses first."
             )
 
-        delete_query = "DELETE FROM school_teachers WHERE teacher_id = %s"
+        delete_query = "DELETE FROM teacher WHERE teacher_id = %s"
         cursor.execute(delete_query, (teacher_id,))
         connection.commit()
         
@@ -1775,7 +1774,7 @@ async def delete_teacher(teacher_id: int):
 @app.get("/teachers/department/{department}", response_model=List[dict])
 async def get_department_teachers(department: str):
     try:
-        cursor.execute("SELECT * FROM school_teachers WHERE department = %s", (department,))
+        cursor.execute("SELECT * FROM teacher WHERE department = %s", (department,))
         teachers = cursor.fetchall()
         
         if not teachers:
@@ -1797,7 +1796,7 @@ async def get_department_teachers(department: str):
 @app.get("/teachers", response_model=List[dict])
 async def get_all_teachers():
     try:
-        cursor.execute("SELECT * FROM school_teachers")
+        cursor.execute("SELECT * FROM teacher")
         teachers = cursor.fetchall()
         
         return [
@@ -2307,7 +2306,7 @@ async def get_dashboard():
         cursor.execute("SELECT COUNT(*) FROM schools")
         total_schools = cursor.fetchone()[0]
 
-        cursor.execute("SELECT COUNT(*) FROM school_teachers")
+        cursor.execute("SELECT COUNT(*) FROM teacher")
         total_teachers = cursor.fetchone()[0]
 
         cursor.execute("SELECT COUNT(*) FROM school_courses")
@@ -2321,11 +2320,11 @@ async def get_dashboard():
             {"city": city, "count": count} for city, count in cursor.fetchall()
         ]
 
-        #cursor.execute("SELECT AVG(performance) FROM school_teachers")
+        #cursor.execute("SELECT AVG(performance) FROM teacher")
         #teacher_completion_rate = round(cursor.fetchone()[0] or 0)
 
 
-       # cursor.execute("SELECT name, performance FROM school_teachers ORDER BY performance DESC LIMIT 4")
+       # cursor.execute("SELECT name, performance FROM teacher ORDER BY performance DESC LIMIT 4")
         #top_teachers = [
        #    {"name": name, "performance": performance} for name, performance in cursor.fetchall()]
         
@@ -2350,12 +2349,13 @@ if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
 @app.get("/backend/getCourses/{teacher_id}")
-async def get_courses(teacher_id : int, status_code):
-
+async def get_courses(teacher_id: int, status_code):
     try:
-        cursor.execute("SELECT * FROM courses WHERE teacher_id = %s", (teacher_id))
-        if cursor.fetchone() is None:
-            raise HTTPException(status_code=400, detail="Invalid lesson_id")
+        cursor.execute("SELECT * FROM courses WHERE teacher_id = %s", (teacher_id,))
+        courses = cursor.fetchall()
+        if not courses:
+            raise HTTPException(status_code=400, detail="Invalid teacher_id")
+        return {"courses": courses}
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
