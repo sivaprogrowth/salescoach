@@ -2066,11 +2066,6 @@ async def add_presentation(request: Request):
     try:
         presentation = await request.json()
         
-        required_keys = ["lesson_id", "title", "content", "media_urls", "duration"]
-        for key in required_keys:
-            if key not in presentation:
-                raise HTTPException(status_code=400, detail=f"Missing required field: {key}")
-        
         cursor.execute("SELECT 1 FROM school_lessons WHERE lesson_id = %s", (presentation["lesson_id"],))
         if cursor.fetchone() is None:
             raise HTTPException(status_code=400, detail="Invalid lesson_id")
@@ -2352,4 +2347,16 @@ def healthcheck():
     
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+@app.get("/backend/getCourses/{teacher_id}")
+async def get_courses(teacher_id : int, status_code):
+
+    try:
+        cursor.execute("SELECT * FROM courses WHERE teacher_id = %s", (teacher_id))
+        if cursor.fetchone() is None:
+            raise HTTPException(status_code=400, detail="Invalid lesson_id")
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
