@@ -1513,9 +1513,6 @@ async def view_all_schools(company_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-
-
 @app.post("/backend/school/addCourse")
 async def add_course(request: Request):
     try:
