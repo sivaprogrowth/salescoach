@@ -1517,15 +1517,29 @@ async def add_course(request: Request):
     try:
         course = await request.json()
         
-        # Check for required fields
         required_keys = ["name", "school_id", "grade_id", "description", "teacher_id", "capacity", "duration"]
         for key in required_keys:
             if key not in course:
                 raise HTTPException(status_code=400, detail=f"Missing required field: {key}")
-        
+
+        print(f"Received Course Data: {course}")
+
+        cursor.execute("SELECT 1 FROM school_teachers WHERE teacher_id = %s", (course["teacher_id"],))
+        if cursor.fetchone() is None:
+            raise HTTPException(status_code=400, detail="Invalid teacher_id")
+
+        cursor.execute("SELECT 1 FROM schools WHERE school_id = %s", (course["school_id"],))
+        if cursor.fetchone() is None:
+            raise HTTPException(status_code=400, detail="Invalid school_id")
+
+
+        cursor.execute("SELECT 1 FROM grades WHERE grade_id = %s", (course["grade_id"],))
+        if cursor.fetchone() is None:
+            raise HTTPException(status_code=400, detail="Invalid grade_id")
+
         insert_query = """
-            INSERT INTO school_courses (name, school_id, grade_id, description, teacher_id, capacity, duration) 
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO school_courses (name, school_id, grade_id, description, teacher_id, capacity, duration, created_at, updated_at) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         """
         cursor.execute(insert_query, (
             course["name"],
@@ -2343,20 +2357,21 @@ async def get_dashboard():
 @app.get("/backend/health",status_code=status.HTTP_200_OK)
 def healthcheck():
     return {"message":"Its working fine"}
+
+@app.get("/backend/getCourses/{teacher_id}")
+async def get_courses(teacher_id: int):
+    try:
+        cursor.execute("SELECT * FROM school_courses WHERE teacher_id = %s", (teacher_id,))
+        courses = cursor.fetchall()
+        if not courses:
+            return {"message": "No courses found for this teacher_id"}
+        return {"courses": courses}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
-@app.get("/backend/getCourses/{teacher_id}")
-async def get_courses(teacher_id: int, status_code):
-    try:
-        cursor.execute("SELECT * FROM courses WHERE teacher_id = %s", (teacher_id,))
-        courses = cursor.fetchall()
-        if not courses:
-            raise HTTPException(status_code=400, detail="Invalid teacher_id")
-        return {"courses": courses}
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
 
