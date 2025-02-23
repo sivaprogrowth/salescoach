@@ -1468,14 +1468,14 @@ async def delete_grades(grade_id: int):
             raise HTTPException(status_code=404, detail="Grade not found")
         return {"message": "Grade deleted successfully"}
 
-@app.get("/backend/viewAllSchools/{company_id}", response_model=List[dict])
-async def view_all_schools(company_id: int):
+from fastapi import FastAPI, HTTPException
+from typing import List, Dict
+
+@app.get("/backend/viewAllSchools/{company_id}", response_model=List[Dict])
+async def view_all_schools(company_id: int) -> List[Dict]:
     try:
         cursor.execute("SELECT * FROM schools WHERE company_id = %s", (company_id,))
         schools = cursor.fetchall()
-        
-        if not schools:
-            raise HTTPException(status_code=404, detail="No schools found for this company ID")
         
         return [
             {
@@ -1498,7 +1498,7 @@ async def view_all_schools(company_id: int):
                 "zipcode": school[16],
                 "country": school[17]
             } for school in schools
-        ]
+        ] if schools else []
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
