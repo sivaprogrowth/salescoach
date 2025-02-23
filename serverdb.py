@@ -25,6 +25,8 @@ import boto3
 import tempfile
 import crud
 import shutil
+from typing import Dict
+from contextlib import contextmanager
 load_dotenv()
 
 DATABASE = os.getenv('DATABASE')
@@ -37,6 +39,15 @@ connection = mysql.connector.connect(
     database = DATABASE,
     passwd = PASSWD
 )
+
+@contextmanager
+def get_db_cursor():
+    try:
+        yield cursor
+        connection.commit()
+    except Exception as e:
+        connection.rollback()
+        raise e
 
 sns_client = boto3.client('sns', region_name='ap-south-1')
 SNS_TOPIC_ARN = os.getenv('SNS_TOPIC_ARN') 
@@ -1317,69 +1328,49 @@ async def edit_school(request: Request):
     return {"message": "School updated successfully"}
 
 @app.delete("/backend/deleteSchool")
-async def delete_school(request: Request):
+async def delete_school(request: Request) -> Dict[str, str]:
     school_id = request.query_params.get('school_id')
     if not school_id:
         raise HTTPException(status_code=400, detail="Missing school_id in query parameters")
 
     try:
-       
-        cursor.execute("""
-            DELETE FROM school_assessments 
-            WHERE course_id IN (
-                SELECT course_id FROM school_courses WHERE school_id = %s
-            )
-        """, (school_id,))
-        connection.commit()
+        with get_db_cursor() as cur:
+            cur.execute("SELECT school_id FROM schools WHERE school_id = %s", (school_id,))
+            if not cur.fetchone():
+                raise HTTPException(status_code=404, detail="School not found")
 
-        
-        cursor.execute("""
-            DELETE FROM school_presentations 
-            WHERE lesson_id IN (
-                SELECT lesson_id FROM school_lessons WHERE course_id IN (
-                    SELECT course_id FROM school_courses WHERE school_id = %s
-                )
-            )
-        """, (school_id,))
-        connection.commit()
+            delete_operations = [
+                """DELETE FROM school_assessments 
+                    WHERE course_id IN (
+                        SELECT course_id FROM school_courses WHERE school_id = %s
+                    )""",
+                """DELETE FROM school_presentations 
+                    WHERE lesson_id IN (
+                        SELECT lesson_id FROM school_lessons WHERE course_id IN (
+                            SELECT course_id FROM school_courses WHERE school_id = %s
+                        )
+                    )""",
+                """DELETE FROM school_lessons 
+                    WHERE course_id IN (
+                        SELECT course_id FROM school_courses WHERE school_id = %s
+                    )""",
+                "DELETE FROM school_courses WHERE school_id = %s",
+                "DELETE FROM grades WHERE school_id = %s",
+                """DELETE FROM teacher 
+                    WHERE teacher_id IN (
+                        SELECT teacher_id FROM school_courses WHERE school_id = %s
+                    )""",
+                "DELETE FROM schools WHERE school_id = %s"
+            ]
 
-        
-        cursor.execute("""
-            DELETE FROM school_lessons 
-            WHERE course_id IN (
-                SELECT course_id FROM school_courses WHERE school_id = %s
-            )
-        """, (school_id,))
-        connection.commit()
-
-        
-        cursor.execute("DELETE FROM school_courses WHERE school_id = %s", (school_id,))
-        connection.commit()
-
-        
-        cursor.execute("DELETE FROM grades WHERE school_id = %s", (school_id,))
-        connection.commit()
-
-        
-        cursor.execute("""
-            DELETE FROM teacher 
-            WHERE teacher_id IN (
-                SELECT teacher_id FROM school_courses WHERE school_id = %s
-            )
-        """, (school_id,))
-        connection.commit()
-
-       
-        delete_query = "DELETE FROM schools WHERE school_id = %s"
-        cursor.execute(delete_query, (school_id,))
-        connection.commit()
-
-        if cursor.rowcount == 0:
-            raise HTTPException(status_code=404, detail="School not found")
+            for delete_query in delete_operations:
+                cur.execute(delete_query, (school_id,))
 
         return {"message": "School and all related records deleted successfully"}
+
     except Exception as e:
-        connection.rollback() 
+        raise HTTPException(status_code=409, detail="Cannot delete school due to existing references. Please ensure all related records are deleted first.")
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
 @app.post("/backend/addGrades")
