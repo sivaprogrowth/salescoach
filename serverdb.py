@@ -1387,10 +1387,10 @@ async def add_grades(request: Request):
     try:
         grade = await request.json()
         
-        # Debugging: Print the incoming JSON data
+        
         print(f"Received Grade Data: {grade}")
         
-        # Ensure all necessary keys are present
+        
         required_keys = ["school_id", "name", "capacity", "subjects", "description", "industry", "date_created"]
         for key in required_keys:
             if key not in grade:
@@ -1401,7 +1401,7 @@ async def add_grades(request: Request):
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """
         
-        # Debugging: Print the SQL query and parameters
+        
         print(f"Executing query: {insert_query}")
         print(f"With parameters: ({grade['school_id']}, {grade['name']}, {grade['capacity']}, {grade['subjects']}, {grade['description']}, {grade['industry']}, {grade['date_created']})")
         
@@ -2369,9 +2369,22 @@ async def get_courses(teacher_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
+
+@app.get("/backend/getAllCourses/{school_id}")
+async def get_all_courses(school_id: int):
+    try:
+        cursor.execute("SELECT * FROM school_courses WHERE school_id = %s", (school_id,))
+        courses = cursor.fetchall()
+        if not courses:
+            return {"message": "No courses found for this school_id"}
+        return {"courses": courses}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)
 
 
 
