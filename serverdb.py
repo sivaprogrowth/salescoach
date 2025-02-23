@@ -1473,7 +1473,30 @@ async def delete_grades(grade_id: int):
 @app.get("/backend/viewAllSchools/{company_id}", response_model=List[Dict])
 async def view_all_schools(company_id: int) -> List[Dict]:
     try:
-        cursor.execute("SELECT * FROM schools WHERE company_id = %s", (company_id,))
+        cursor.execute("""
+            SELECT 
+                school_id,
+                school_name,
+                school_type,
+                education_board,
+                company_id,
+                principal_name,
+                established_year,
+                student_capacity,
+                name,
+                phone,
+                website,
+                email,
+                street_address,
+                city,
+                state,
+                description,
+                zipcode,
+                country
+            FROM schools 
+            WHERE company_id = %s
+        """, (company_id,))
+        
         schools = cursor.fetchall()
         
         return [
