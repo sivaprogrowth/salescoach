@@ -27,6 +27,8 @@ import crud
 import shutil
 from typing import Dict
 from contextlib import contextmanager
+from fastapi import FastAPI, HTTPException
+from typing import List, Dict
 load_dotenv()
 
 DATABASE = os.getenv('DATABASE')
@@ -1468,9 +1470,6 @@ async def delete_grades(grade_id: int):
             raise HTTPException(status_code=404, detail="Grade not found")
         return {"message": "Grade deleted successfully"}
 
-from fastapi import FastAPI, HTTPException
-from typing import List, Dict
-
 @app.get("/backend/viewAllSchools/{company_id}", response_model=List[Dict])
 async def view_all_schools(company_id: int) -> List[Dict]:
     try:
@@ -1508,41 +1507,73 @@ async def add_course(request: Request):
     try:
         course = await request.json()
         
-        required_keys = ["name", "school_id", "grade_id", "description", "teacher_id", "capacity", "duration"]
+        required_keys = ["name", "school_id", "grade_id", "description", "capacity", "duration"]
         for key in required_keys:
             if key not in course:
                 raise HTTPException(status_code=400, detail=f"Missing required field: {key}")
 
         print(f"Received Course Data: {course}")
 
-        cursor.execute("SELECT 1 FROM school_teachers WHERE teacher_id = %s", (course["teacher_id"],))
-        if cursor.fetchone() is None:
-            raise HTTPException(status_code=400, detail="Invalid teacher_id")
-
+        
         cursor.execute("SELECT 1 FROM schools WHERE school_id = %s", (course["school_id"],))
         if cursor.fetchone() is None:
             raise HTTPException(status_code=400, detail="Invalid school_id")
 
-
+        
         cursor.execute("SELECT 1 FROM grades WHERE grade_id = %s", (course["grade_id"],))
         if cursor.fetchone() is None:
             raise HTTPException(status_code=400, detail="Invalid grade_id")
 
         insert_query = """
-            INSERT INTO school_courses (name, school_id, grade_id, description, teacher_id, capacity, duration, created_at, updated_at) 
-            VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            INSERT INTO school_courses (name, school_id, grade_id, description, capacity, duration, created_at, updated_at) 
+            VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         """
         cursor.execute(insert_query, (
             course["name"],
             course["school_id"],
             course["grade_id"],
             course["description"],
-            course["teacher_id"],
             course["capacity"],
             course["duration"]
         ))
         connection.commit()
         return {"course_id": cursor.lastrowid}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/backend/school/assignTeacherToCourse")
+async def assign_teacher(request: Request):
+    try:
+        data = await request.json()
+        
+        required_keys = ["course_id", "teacher_id"]
+        for key in required_keys:
+            if key not in data:
+                raise HTTPException(status_code=400, detail=f"Missing required field: {key}")
+
+        
+        cursor.execute("SELECT 1 FROM school_courses WHERE course_id = %s", (data["course_id"],))
+        if cursor.fetchone() is None:
+            raise HTTPException(status_code=400, detail="Invalid course_id")
+
+        
+        cursor.execute("SELECT 1 FROM school_teachers WHERE teacher_id = %s", (data["teacher_id"],))
+        if cursor.fetchone() is None:
+            raise HTTPException(status_code=400, detail="Invalid teacher_id")
+
+        
+        update_query = """
+            UPDATE school_courses 
+            SET teacher_id = %s, updated_at = CURRENT_TIMESTAMP
+            WHERE course_id = %s
+        """
+        cursor.execute(update_query, (data["teacher_id"], data["course_id"]))
+        connection.commit()
+        
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Course not found or no changes made")
+            
+        return {"message": "Teacher assigned successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
