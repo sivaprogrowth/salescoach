@@ -1506,7 +1506,7 @@ async def view_all_schools(company_id: int) -> List[Dict]:
 async def add_course(request: Request):
     try:
         course = await request.json()
-        
+
         required_keys = ["name", "school_id", "grade_id", "description", "capacity", "duration"]
         for key in required_keys:
             if key not in course:
@@ -1524,21 +1524,67 @@ async def add_course(request: Request):
         if cursor.fetchone() is None:
             raise HTTPException(status_code=400, detail="Invalid grade_id")
 
-        insert_query = """
-            INSERT INTO school_courses (name, school_id, grade_id, description, capacity, duration, created_at, updated_at) 
-            VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        """
-        cursor.execute(insert_query, (
-            course["name"],
-            course["school_id"],
-            course["grade_id"],
-            course["description"],
-            course["capacity"],
-            course["duration"]
-        ))
+        
+        teacher_id = course.get("teacher_id")
+        if teacher_id is not None:
+            cursor.execute("SELECT 1 FROM school_teachers WHERE teacher_id = %s", (teacher_id,))
+            if cursor.fetchone() is None:
+                raise HTTPException(status_code=400, detail="Invalid teacher_id")
+
+        
+        if teacher_id is not None:
+            insert_query = """
+                INSERT INTO school_courses (
+                    name, 
+                    school_id, 
+                    grade_id, 
+                    description, 
+                    capacity, 
+                    duration, 
+                    teacher_id,
+                    created_at, 
+                    updated_at
+                ) 
+                VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """
+            params = (
+                course["name"],
+                course["school_id"],
+                course["grade_id"],
+                course["description"],
+                course["capacity"],
+                course["duration"],
+                teacher_id
+            )
+        else:
+            insert_query = """
+                INSERT INTO school_courses (
+                    name, 
+                    school_id, 
+                    grade_id, 
+                    description, 
+                    capacity, 
+                    duration, 
+                    created_at, 
+                    updated_at
+                ) 
+                VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """
+            params = (
+                course["name"],
+                course["school_id"],
+                course["grade_id"],
+                course["description"],
+                course["capacity"],
+                course["duration"]
+            )
+
+        cursor.execute(insert_query, params)
         connection.commit()
         return {"course_id": cursor.lastrowid}
     except Exception as e:
+        connection.rollback()
+        print(f"Error adding course: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/backend/school/assignTeacherToCourse")
