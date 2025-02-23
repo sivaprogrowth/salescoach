@@ -2375,9 +2375,28 @@ async def get_all_courses(school_id: int):
     try:
         cursor.execute("SELECT * FROM school_courses WHERE school_id = %s", (school_id,))
         courses = cursor.fetchall()
+        
         if not courses:
             return {"message": "No courses found for this school_id"}
-        return {"courses": courses}
+        
+        _courses = []
+        for course in courses:
+            formatted_course = {
+                "id": course[0],
+                "course_name": course[1],
+                "description": course[2],
+                "credit_hours": course[3],
+                "max_students": course[4],
+                "min_students": course[5],
+                "created_at": course[6],
+                "updated_at": course[7],
+                "teacher_id": course[8],
+                "school_id": course[9]
+            }
+            _courses.append(_courses)
+            
+        return {"courses": _courses}
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
