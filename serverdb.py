@@ -2379,7 +2379,7 @@ async def get_all_courses(school_id: int):
         if not courses:
             return {"message": "No courses found for this school_id"}
         
-        _courses = []
+        formatted_courses = []
         for course in courses:
             formatted_course = {
                 "id": course[0],
@@ -2388,14 +2388,14 @@ async def get_all_courses(school_id: int):
                 "credit_hours": course[3],
                 "max_students": course[4],
                 "min_students": course[5],
-                "created_at": course[6],
-                "updated_at": course[7],
+                "created_at": str(course[6]),  
+                "updated_at": str(course[7]),  
                 "teacher_id": course[8],
                 "school_id": course[9]
             }
-            _courses.append(_courses)
+            formatted_courses.append(formatted_course) 
             
-        return {"courses": _courses}
+        return {"courses": formatted_courses}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -2403,7 +2403,7 @@ async def get_all_courses(school_id: int):
     
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
 
 
 
