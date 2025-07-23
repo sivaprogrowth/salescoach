@@ -1,5 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, Form , status, Request , Response, HTTPException, Query
-from fastapi.responses import FileResponse , JSONResponse
+from fastapi.responses import RedirectResponse , JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 from util import *
@@ -18,12 +18,14 @@ import mysql.connector
 import queue
 import requests
 import io
+import uuid
 from io import BytesIO
 from typing import Optional
 import re
 import boto3
 import tempfile
 import shutil
+import pinecone
 load_dotenv()
 
 DATABASE = os.getenv('DATABASE')
@@ -42,6 +44,12 @@ SNS_TOPIC_ARN = os.getenv('SNS_TOPIC_ARN')
 SNS_TOPIC_TEXT_RAG_ARN = os.getenv('SNS_TOPIC_TEXT_RAG_ARN')
 SNS_TOPIC_VOICE_BOT_NEXT_QUESTION_ARN = os.getenv('SNS_TOPIC_VOICE_BOT_NEXT_QUESTION_ARN')
 SNS_TOPIC_CV_FEEDBACK_ARN = os.getenv('SNS_TOPIC_CV_FEEDBACK_ARN')
+SNS_TOPIC_COVER_LETTER_ARN = os.getenv('SNS_TOPIC_COVER_LETTER_ARN')
+SNS_TOPIC_UPLOAD_CV_ARN = os.getenv('SNS_TOPIC_UPLOAD_CV_ARN')
+SNS_JOB_ASSISTANCE_GPT_ARN = os.getenv('SNS_JOB_ASSISTANCE_GPT_ARN')
+SNS_TOPIC_JOB_PREFERRENCE_ARN = os.getenv('SNS_TOPIC_JOB_PREFERRENCE_ARN')
+SNS_TOPIC_JOB_REFINE_ARN = os.getenv('SNS_TOPIC_JOB_REFINE_ARN')
+SNS_TOPIC_SALES_ASSISST_ARN = os.getenv('SNS_TOPIC_SALES_ASSISST_ARN')
 # Glific API credentials
 GLIFIC_PHONE_NUMBER = os.getenv("GLIFIC_PHONE_NUMBER")
 GLIFIC_PASSWORD = os.getenv("GLIFIC_PASSWORD")
@@ -121,23 +129,28 @@ def getQnA(text):
     qna = qna.choices[0].message.content
     return qna
 
+def get_index_list_glific():
+    
+    cursor.execute("SELECT DISTINCT idx FROM qna")
+    result = cursor.fetchall()
+    index_list = [row[0] for row in result if row[0] is not None]
+    return index_list 
+        
+
 def saveQnA(text , index):
     text = text.replace('```json', '').replace('```', '')
     print(text)
     qnas = json.loads(text)
     print (qnas)
     for idx , qna in enumerate(qnas):
-        current_datetime = datetime.now()
-        timestamp = int(current_datetime.timestamp())
         data = (
-            timestamp,
             qna['Question'],   # question
             qna['Answer'],  # answer
             index # index
         )
         insert_query = """
-                            INSERT INTO qna (id, question, answer, idx) 
-                            VALUES (%s, %s, %s, %s)
+                            INSERT INTO qna (question, answer, idx) 
+                            VALUES (%s, %s, %s)
                         """
         cursor.execute(insert_query, data)
         connection.commit()
@@ -193,6 +206,126 @@ It is compulsory for you to rate the salesperson response. """},
         return result + f"That was the feed back I had. Thanks for taking the test."
     else :
         return result + f"That was the feed back I had . now your next question is \n {questions[qn+1]}"
+
+def extract_query_details(user_query):
+    
+    function_schema ={
+        "name": "categorize_query",
+        "description": "Extracts description and price constraints from user query",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "description": "A meaningful product-related description extracted from the query. If no specific product details are found, this field should be empty."
+                },
+                "price_lower_bound": {
+                    "type": "integer",
+                    "description": "The minimum price mentioned in the query, if any.",
+                    "default": 0
+                },
+                "price_upper_bound": {
+                    "type": "integer",
+                    "description": "The maximum price mentioned in the query, if any.",
+                    "default": 999999
+                }
+            },
+            "required": ["description","price_lower_bound","price_upper_bound"]
+        }
+    }
+                        
+    response = client.chat.completions.create(
+        model="gpt-4-turbo",
+        messages=[
+            {"role": "system", "content": "You are an AI expert at classifying product search query preferences."},
+            {"role": "user", "content": f"Classify the following search query preferences:\n\n{user_query}"}
+        ],
+        functions=[function_schema],
+        function_call={"name": "categorize_query"}
+    )
+    
+    
+    function_call = response.choices[0].message.function_call
+    structured_query = json.loads(function_call.arguments)
+    return structured_query
+
+    
+async def genPitch(message, product_type):
+    print(message)
+    # Extract structured query details
+    structured_query = extract_query_details(message)
+    print(structured_query)
+    search_description = structured_query.get("description","")
+    lower_bound = structured_query.get("price_lower_bound",0)
+    upper_bound = structured_query.get("price_upper_bound",9999999)
+
+    # Initialize Pinecone client
+    pinecone_client = pinecone.Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+    index = pinecone_client.Index("whirlpool-products")
+
+    # Generate embedding for the input message
+    embedding_response = client.embeddings.create(
+        model="text-embedding-ada-002",
+        input=search_description
+    )
+    query_vector = embedding_response.data[0].embedding
+
+    # Retrieve top 3 matching products from Pinecone
+    pinecone_response = index.query(vector=query_vector, top_k=10, include_metadata=True)
+    
+    if not pinecone_response.matches:
+        return {"error": "No suitable product found."}
+    print(pinecone_response)
+    # Apply price filtering
+    filtered_products = [
+        match.metadata for match in pinecone_response.matches
+        if lower_bound <= match.metadata["product_price"] <= upper_bound
+    ]
+
+    if not filtered_products:
+        return {"error": "No products found within the specified price range."}
+    
+    products = {}
+    for i, metadata in enumerate(filtered_products[:3]):
+        product_name = metadata["product_name"]
+        whirlpool_description = metadata.get("description", "No description available.")
+        img_url = metadata.get("image_url", "")
+        whirlpool_price = metadata.get("product_price", 0)
+        discounted_price = metadata.get("discounted_price", whirlpool_price + 1000)  # Ensuring Amazon price is higher
+        if lower_bound <= whirlpool_price <= upper_bound:
+            # prompt = f"""
+            # You are a professional salesperson. Your task is to persuade a customer to buy the Whirlpool product instead of Amazon.
+            
+            # Product Name: {product_name}
+            # Whirlpool Price: ₹{whirlpool_price}
+            # Discounted Price: ₹{discounted_price}
+            
+            # Features & Description:
+            # {whirlpool_description}
+            
+            # Highlight why buying directly from Whirlpool is the better deal, focusing on savings and additional benefits.
+            # Write an engaging, convincing pitch.But make sure the pitch is not more than 50 words.
+            # """
+            
+            # # Query GPT-4 for sales pitch
+            # response = client.chat.completions.create(
+            #     model="gpt-4",
+            #     messages=[{"role": "system", "content": "You are a sales expert."},
+            #             {"role": "user", "content": prompt}]
+            # )
+            # gpt_pitch = response.choices[0].message.content
+
+            # products[f"prod_{i+1}"] = {
+            #     "details": f"*Product Code:* {product_name}\n*Feature:*\n{gpt_pitch}\n*Details:*\n{whirlpool_description}\n*Product Price :* ₹{whirlpool_price}\n*Discounted Price :* ₹{discounted_price}",
+            #     "img_url": img_url
+            # }
+
+            products[f"prod_{i+1}"] = {
+                "details": f"*Product Code:* {product_name}\n*Details:*\n{whirlpool_description}\n*MRP :* ₹{whirlpool_price}\n*Offer Price :* ₹{discounted_price}",
+                "img_url": img_url
+            }
+    
+    return products
 
 def audio_callback(indata, frames, time, status):
     if status:
@@ -295,11 +428,9 @@ def get_auth_token():
     except requests.HTTPError as error:
         print("Error fetching auth token:", error)
         raise HTTPException(status_code=500, detail="Unable to fetch auth token")
-        print("Error fetching auth token:", error)
-        raise HTTPException(status_code=500, detail="Unable to fetch auth token")
 
 
-async def send_to_glific_api(flow_id: int, contact_id: int, result: str):
+async def send_to_glific_api(flow_id: int, contact_id: int, result: str, var: str = "result"):
     try:
         auth_token = get_auth_token()
         graphql_query = """
@@ -316,7 +447,7 @@ async def send_to_glific_api(flow_id: int, contact_id: int, result: str):
         graphql_variables = {
             "flowId":flow_id,
             "contactId":contact_id,
-            "result": json.dumps({"result": {"message": result}})
+            "result": json.dumps({var: {"message": result}})
         }
         headers = {
             "authorization": f"{auth_token}",
@@ -352,11 +483,63 @@ def get_user_by_email(email: str):
 def add_user(email: str, password: str):
     cursor.execute("INSERT INTO login (email, password) VALUES (%s, %s)", (email, password))
     connection.commit()
+
+def translate(text,lang):
+
+    telugu = f"""Translate the following English text into Telugu while preserving the original meaning and context. Ensure that the translation is natural and colloquial, and use Telugu characters throughout, maintaining a respectful and formal tone throughout the translation. Do not include any English words in the output. If necessary, reorganize the sentences to maintain coherence. Ensure that the transliterated Hindi sentences are accurately translated into English script, Please focus on clarity, readability, and cultural appropriateness. Take your time to provide high-quality translations. Do not include any digits while translating, translate the numbers as well in the Telugu language words, not the digits in Telugu script. Strictly make sure that the word count in the output sentence is nearly same as the original text. Ensure that '-' is understood well based on the context.(Example: He had 2- 3 days should be interpreted as 2 to 3 instead of 2 minus 3"""
+
+    hindi = f"""You are a professional Indian translator and a native Hindi speaker. I want your help to translate the given text into the Hindi language while preserving the original meaning and context. Strictly make sure that the translation is natural and colloquial. If necessary, reorganize the phrases to maintain coherence. Please focus on clarity, readability, and cultural appropriateness. Take your time to provide high-quality translations. The translated output should feel very natural, as people speak in day to day conversations. Do not include any digits while translating, translate the numbers as well in the Hindi language words, not the digits in Hindi script. STRICTLY MAKE SURE that the output should be less or equal to the input text in length. Ensure that '-' is understood well based on the context.(Example: He had 2- 3 days should be interpreted as 2 to 3 instead of 2 minus 3"""
+
+    if str.lower(lang)=='telugu':
+        prompt = telugu
+    elif str.lower(lang)=='hindi':
+        prompt = hindi
+    
+    response = client.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "system", "content": prompt},
+                  {"role": "user", "content": text}]
+    )
+    
+    translated_text = response["choices"][0]["message"]["content"]
+    
+    print(f"Translated Text: {translated_text}")
+    return translated_text
+
+async def productQuery(user_message, product_details):
+
+    prompt = f"""
+    A customer is asking about a product. Provide a **clear, informative, and engaging** response to their question.
+    
+    **Customer Query:** {user_message}
+    
+    **Product Details:** 
+    {product_details}
+
+    Answer the customer's query in a professional, concise, and persuasive manner but make sure you do not exceed 100 words.
+    """
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "system", "content": "You are a knowledgeable sales expert."},
+                      {"role": "user", "content": prompt}]
+        )
+
+        
+        return response.choices[0].message.content
+ 
+    except Exception as e:
+        return {"error": str(e)}
     
 @app.post("/backend/generateAUD")
 async def stop_recording_endpoint(req : Request):
     content = await req.json()
     text = content['text']
+    lang = content['lang']
+    if lang != "English":
+        text = translate(text,lang)
+
     audio_data = speak(text)
     headers = {
         'Content-Disposition': 'inline; filename="response.wav"',
@@ -553,11 +736,18 @@ async def fetchChatVoice(req: Request):
 @app.post("/backend/publishTextRag",status_code=status.HTTP_200_OK)
 async def publish_to_sns_text_rag(request: Request):
     try:
+        
         # Publish message to SNS with attributes
         current_datetime = datetime.now()
         datetime_string = current_datetime.strftime("%Y%m%d%H%M%S")
         request = await request.json()
 
+        product_details = request.get('product_detail')
+        if product_details is None:
+            product_details="No details"
+        
+
+        print(product_details)
         course_number = int(request['course_number'])
         courses_name = request['courses_name']
         course_title = courses_name.split("\n")[course_number].split(".")[1].strip()
@@ -568,26 +758,82 @@ async def publish_to_sns_text_rag(request: Request):
 
         print("course title ",course_title)
         print("lesson name ",lesson_name)
+        idx = get_index_by_lesson(lesson_name)
+        if product_details != "No details":
+            result = await productQuery(request['message'],product_details)
+            print(result)
+        else:
+            result  = await run_script(request['message'],idx.split(".")[-2])
+        course_id = get_course_id_by_name(course_title)
+        data = (
+            result, # message
+            datetime_string,  # transactionId
+            idx,
+            course_id,
+            request['user_id']
+        )
+        insert_query = """
+                        INSERT INTO textRag (message, tranId, idx, course_id, user_id)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """
+        cursor.execute(insert_query, data)
+        connection.commit()
+        return {"message":result}
+    except (BotoCoreError, ClientError) as error:
+        print(f"Failed to publish message to SNS: {error}")
+        raise HTTPException(status_code=500, detail="Failed to send message to SNS")
+    
+
+@app.get("/backend/sales_assisst/products")
+def get_products():
+    try:
+        cursor.execute("SELECT product_name FROM whirlpool_products")
+        products = cursor.fetchall()
+
+        # Formatting response
+        product_names = [f"{i+1}. {p[0]}" for i, p in enumerate(products)]
+        product_name_list = [p[0] for p in products]
+
+        return {
+            "message": "\n".join(product_names),
+            "product_name_list": product_name_list
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"An unexpected error occurred: {str(e)}"
+        )
+    
+@app.post("/backend/sales_assisst/products_description_by_name")
+async def get_products_details(request:Request):
+    try:
+        data = await request.json()
+        index = int(data.get("index"))
+        names_list = data.get("product_name_list")
+        name = names_list.split(".")[1].strip()
+        print(name)
+        # Secure and correct query
+        cursor.execute("SELECT description FROM whirlpool_products WHERE product_name = %s", (name,))
+        product = cursor.fetchone()
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found.")
+
+        return {"message": {"product_details": product[0]}}
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"An unexpected error occurred: {str(e)}"
+        )
+    
+@app.post("/backend/publishsales_assisst",status_code=status.HTTP_200_OK)
+async def publish_to_sns_sales_assisst(request: Request):
+    try:
+        request = await request.json()
         sns_response = sns_client.publish(
-            TopicArn=SNS_TOPIC_TEXT_RAG_ARN,
+            TopicArn=SNS_TOPIC_SALES_ASSISST_ARN,
             Message=request['message'],
             MessageAttributes={
-                'transactionId': {
-                    'DataType': 'Number',
-                    'StringValue': datetime_string
-                },
-                 'lesson_name': {
-                    'DataType': 'String',
-                    'StringValue': lesson_name
-                },
-                'user_id': {
-                    'DataType': 'String',
-                    'StringValue': request['user_id']
-                },
-                'course_title': {
-                    'DataType': 'String',
-                    'StringValue': course_title
-                },
                 'flow_id': {
                     'DataType': 'Number',
                     'StringValue': str(request['flow_id'])
@@ -595,18 +841,23 @@ async def publish_to_sns_text_rag(request: Request):
                 'contact_id': {
                     'DataType': 'Number',
                     'StringValue': str(request['contact_id'])
+                },
+                'product_type': {
+                    'DataType': 'String',
+                    'StringValue': request['product_type']
                 }
+
             }
         )
         print(f"Message sent to SNS, MessageId: {sns_response['MessageId']}")
-        return {"status": "Message sent to SNS successfully", "MessageId": sns_response['MessageId'], "TransactionId":datetime_string}
+        return {"status": "Message sent to SNS successfully", "MessageId": sns_response['MessageId']}
     
     except (BotoCoreError, ClientError) as error:
         print(f"Failed to publish message to SNS: {error}")
         raise HTTPException(status_code=500, detail="Failed to send message to SNS")
     
-@app.post("/backend/snsTextRag",status_code=status.HTTP_200_OK)
-async def sns_listener_TextRag(request: Request):
+@app.post("/backend/snsSalesAssisst",status_code=status.HTTP_200_OK)
+async def sns_sales_assisst(request: Request):
     headers = request.headers
     message_type = headers.get("x-amz-sns-message-type")
 
@@ -629,33 +880,13 @@ async def sns_listener_TextRag(request: Request):
         print(f"Received notification: {body['Message']}")
         # Retrieve contactId and flowId from MessageAttributes
         message_attributes = body['MessageAttributes'] or {}
-        transactionId = message_attributes.get('transactionId', {}).get('Value')
-        lesson_name = message_attributes.get('lesson_name', {}).get('Value')
         flow_id = message_attributes.get('flow_id', {}).get('Value')
         contact_id = message_attributes.get('contact_id', {}).get('Value')
-        user_id = message_attributes.get('user_id', {}).get('Value')
-        course_title = message_attributes.get('course_title', {}).get('Value')
-        print("course_title",course_title)
-        print("lesson name ",lesson_name)
-        idx = get_index_by_lesson(lesson_name)
-        print("idx ",idx)
-        course_id = get_course_id_by_name(course_title)
-        result  = await run_script(body['Message'],idx.split(".")[-2])
-        response =  await send_to_glific_api(flow_id , contact_id,result)
+        product_type = message_attributes.get('product_type', {}).get('Value')
+        result  = await genPitch(body['Message'],product_type)
+        print(result)
+        response =  await send_to_glific_api(flow_id , contact_id,result,"product_result")
         print("sent to glific successfully: ",response)
-        data = (
-            result, # message
-            transactionId,  # transactionId
-            idx,
-            course_id,
-            user_id 
-        )
-        insert_query = """
-                        INSERT INTO textRag (message, tranId, idx, course_id, user_id)
-                        VALUES (%s, %s, %s, %s, %s)
-                    """
-        cursor.execute(insert_query, data)
-        connection.commit()
     # If unknown message type, return 400 error
     else:
         raise HTTPException(status_code=400, detail="Unknown message type")
@@ -964,7 +1195,9 @@ async def get_MCQ(req: Request):
 async def getCoursesGlific(req : Request):
     data = await req.json()
     user_id = data['user_id']
+    print("user_id is ",user_id)
     company_id = get_company_by_user_service(user_id)
+    print(company_id)
     if not company_id:
         print("here")
         raise HTTPException(status_code=404, detail="User not associated with any company")
@@ -977,6 +1210,7 @@ async def getCoursesGlific(req : Request):
         message = "Courses available to you are as follows:\n" + "\n".join(
             [f"{i+1}. {title}" for i, title in enumerate(course_titles)]
         )
+        print("message is ",message)
         return {"message":message}
     except Exception as e:
         return HTTPException(status_code=500, detail= str(e))
@@ -985,8 +1219,11 @@ async def getCoursesGlific(req : Request):
 async def getLessonsGlific(req : Request):
     data = await req.json()
     course_number = int(data['course_number'])
+    print("course number is ",course_number)
     courses_name = data['courses_name']
+    print("courses name is ",courses_name)
     course_title = courses_name.split("\n")[course_number].split(".")[1].strip()
+    print("course title is ",course_title)
     course_id = get_course_id_by_name(course_title)
     lessons = get_lessons_service(course_id)
     if not lessons:
@@ -1060,8 +1297,11 @@ async def getFeedbackGlific(req : Request):
     course_number = int(data['course_number'])
     courses_name = data['courses_name']
     course_title = courses_name.split("\n")[course_number].split(".")[1].strip()
+    print(course_title)
     course_id = get_course_id_by_name(course_title)
+    print(course_id)
     feedback = get_feedback_questions_service(course_id)
+    print(feedback)
     if not feedback:
         return {"message":"No feedback available for this course."}
     return  feedback
@@ -1338,16 +1578,16 @@ async def sns_submit_answer(request: Request):
 async def publish_next_question(req: Request):
     try:
         data = await req.json()
-        pdf_url = data.get("result")
+        user_id = data.get("user_id")
         flow_id = data.get("flow_id")
         contact_id = data.get("contact_id")
         sns_response = sns_client.publish(
             TopicArn=SNS_TOPIC_CV_FEEDBACK_ARN,
             Message="CV Feedback",
             MessageAttributes={
-                'pdf_url': {
-                    'DataType': 'String',
-                    'StringValue': pdf_url
+                'user_id': {
+                    'DataType': 'Number',
+                    'StringValue': user_id
                 },
                 'flow_Id': {
                     'DataType': 'Number',
@@ -1391,14 +1631,485 @@ async def sns_next_question(request: Request):
         # Retrieve contactId and flowId from MessageAttributes
         message_attributes = body['MessageAttributes'] or {}
         contact_id = message_attributes.get('contact_Id', {}).get('Value')
+        user_id = message_attributes.get('user_id', {}).get('Value')
+        flow_id = message_attributes.get('flow_Id', {}).get('Value')
+        result = get_cv_feedback(user_id)
+        print(result)
+        response =  await send_to_glific_api(flow_id , contact_id,result,"cv_feedback")
+        print("sent to glific successfully: ",response)
+    # If unknown message type, return 400 error
+    else:
+        raise HTTPException(status_code=400, detail="Unknown message type")
+
+@app.post("/backend/uploadCV", status_code=status.HTTP_200_OK)
+async def uploadCV(req: Request):
+    try:
+        data = await req.json()
+        pdf_url = data.get("pdf_url")
+        user_id = data.get("user_id")
+        flow_id = data.get("flow_id")
+        contact_id = data.get("contact_id")
+        id = uuid.uuid4().hex
+        print(pdf_url + "\n" + user_id + "\n" + flow_id + "\n" + contact_id + "\n" + id)
+        sns_response = sns_client.publish(
+            TopicArn=SNS_TOPIC_UPLOAD_CV_ARN,
+            Message="hello",
+            MessageAttributes={
+                'pdf_url': {
+                    'DataType': 'String',
+                    'StringValue': pdf_url
+                },
+                'user_id': {
+                    'DataType': 'Number',
+                    'StringValue': user_id
+                },
+                'flow_Id': {
+                    'DataType': 'Number',
+                    'StringValue': flow_id
+                },
+                'contact_Id': {
+                    'DataType': 'Number',
+                    'StringValue': contact_id
+                },
+                'id': {
+                    'DataType': 'String',
+                    'StringValue': id
+                },
+            }
+        )
+        print(f"Message sent to SNS, MessageId: {sns_response['MessageId']}")
+        return {"status": "Message sent to SNS successfully", "MessageId": sns_response['MessageId'], "cv_id": id}
+        
+    except (BotoCoreError, ClientError) as error:
+        print(f"Failed to publish message to SNS: {error}")
+        raise HTTPException(status_code=500, detail="Failed to send message to SNS")
+    
+@app.post("/backend/snsUploadCV", status_code=status.HTTP_200_OK)
+async def sns_next_question(request: Request):
+    headers = request.headers
+    message_type = headers.get("x-amz-sns-message-type")
+
+    if not message_type:
+        raise HTTPException(status_code=400, detail="Invalid message type header")
+
+    body = await request.json()
+
+    # Check if it's a SubscriptionConfirmation message
+    if message_type == "SubscriptionConfirmation" and body['SubscribeURL']:
+        # Confirm the subscription
+        response = requests.get(body['SubscribeURL'])
+        if response.status_code == 200:
+            print("Subscription confirmed.")
+        else:
+            print("Failed to confirm subscription.")
+        return {"status": "Subscription confirmation handled"}
+
+    # Handle Notification message
+    elif message_type == "Notification":
+        # Retrieve contactId and flowId from MessageAttributes
+        message_attributes = body['MessageAttributes'] or {}
+        contact_id = message_attributes.get('contact_Id', {}).get('Value')
+        user_id = message_attributes.get('user_id', {}).get('Value')
         pdf_url = message_attributes.get('pdf_url', {}).get('Value')
         flow_id = message_attributes.get('flow_Id', {}).get('Value')
-        result = get_cv_feedback(pdf_url)
-        # result = "ok"
-        # result = repr(result).strip("'\"")
+        id = message_attributes.get('id', {}).get('Value')
+        upload_cv_to_db_service(pdf_url, user_id , id)
+        response =  await send_to_glific_api(flow_id , contact_id,"successfully uploaded CV")
+        print("sent to glific successfully: ",response)
+    # If unknown message type, return 400 error
+    else:
+        raise HTTPException(status_code=400, detail="Unknown message type")
+
+@app.post("/backend/publishCoverLetter",status_code=status.HTTP_200_OK)
+async def publish_next_question(req: Request):
+    try:
+        data = await req.json()
+        jd = data.get("jd")
+        user_id = data.get("user_id")
+        flow_id = data.get("flow_id")
+        contact_id = data.get("contact_id")
+        sns_response = sns_client.publish(
+            TopicArn=SNS_TOPIC_COVER_LETTER_ARN,
+            Message=jd,
+            MessageAttributes={
+                'user_id': {
+                    'DataType': 'Number',
+                    'StringValue': user_id
+                },
+                'flow_Id': {
+                    'DataType': 'Number',
+                    'StringValue': flow_id
+                },
+                'contact_Id': {
+                    'DataType': 'Number',
+                    'StringValue': contact_id
+                }
+            }
+        )
+        print(f"Message sent to SNS, MessageId: {sns_response['MessageId']}")
+        return {"status": "Message sent to SNS successfully", "MessageId": sns_response['MessageId']}
+    
+    except (BotoCoreError, ClientError) as error:
+        print(f"Failed to publish message to SNS: {error}")
+        raise HTTPException(status_code=500, detail="Failed to send message to SNS")
+    
+@app.post("/backend/snsCoverletter", status_code=status.HTTP_200_OK)
+async def sns_cover_letter(request: Request):
+    headers = request.headers
+    message_type = headers.get("x-amz-sns-message-type")
+
+    if not message_type:
+        raise HTTPException(status_code=400, detail="Invalid message type header")
+
+    body = await request.json()
+
+    # Check if it's a SubscriptionConfirmation message
+    if message_type == "SubscriptionConfirmation" and body['SubscribeURL']:
+        # Confirm the subscription
+        response = requests.get(body['SubscribeURL'])
+        if response.status_code == 200:
+            print("Subscription confirmed.")
+        else:
+            print("Failed to confirm subscription.")
+        return {"status": "Subscription confirmation handled"}
+
+    # Handle Notification message
+    elif message_type == "Notification":
+        # Retrieve contactId and flowId from MessageAttributes
+        message_attributes = body['MessageAttributes'] or {}
+        contact_id = message_attributes.get('contact_Id', {}).get('Value')
+        user_id = message_attributes.get('user_id', {}).get('Value')
+        flow_id = message_attributes.get('flow_Id', {}).get('Value')
+        jd = body['Message']
+        result = get_cover_letter_service(jd , user_id)
         print(result)
-        #result_formatted = repr(result).strip("'").replace("\\", "\\\\")
-        response =  await send_to_glific_api(flow_id , contact_id,result)
+        response =  await send_to_glific_api(flow_id , contact_id,result,"cover_letter")
+        print("sent to glific successfully: ",response)
+    # If unknown message type, return 400 error
+    else:
+        raise HTTPException(status_code=400, detail="Unknown message type")
+    
+@app.post("/backend/getJobTitle", status_code=status.HTTP_200_OK)
+async def get_job_title(req: Request):
+    try:
+        data = await req.json()
+        user_id = data.get("user_id")
+        job_title = get_job_title_service(user_id)
+        return {"message":job_title}
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred: {str(e)}"
+        )
+    
+@app.post("/backend/users/job-preferrance", status_code=status.HTTP_200_OK)
+async def add_job_preferrance(req: Request):
+    try:
+        data = await req.json()
+        add_job_preferrance_service(data)
+        return {"message":"Successfully added job preferrance"}
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred: {str(e)}"
+        )
+    
+@app.get("/backend/jobs/recommend/{phone_number}", status_code=status.HTTP_200_OK)
+def recommend_jobs(phone_number: str):
+    try:
+        jobs = recommend_jobs_service(phone_number,2)
+        return {"recommended_jobs": jobs}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred: {str(e)}"
+        )
+
+@app.post("/backend/users/job-preferrance",status_code=status.HTTP_200_OK)
+async def add_job_preferrance(req: Request):
+    try:
+        data = await req.json()
+        user_id = data.get('user_id'),
+        phone_number = data.get('phone_number'),
+        name = data.get('name'),
+        preferred_location = data.get('preferred_location',""),
+        preferred_job_title = data.get('preferred_job_title',""),
+        expected_salary = data.get('expected_salary',""),
+        cv_id = data.get('cv_id')
+        flow_id = data.get('flow_id')
+        contact_id = data.get('contact_id')
+        sns_response = sns_client.publish(
+            TopicArn=SNS_TOPIC_JOB_PREFERRENCE_ARN,
+            Message="Okey",
+            MessageAttributes={
+                'user_id': {
+                    'DataType': 'Number',
+                    'StringValue': user_id
+                },
+                'flow_Id': {
+                    'DataType': 'Number',
+                    'StringValue': flow_id
+                },
+                'contact_Id': {
+                    'DataType': 'Number',
+                    'StringValue': contact_id
+                },
+                'phone_number': {
+                    'DataType': 'Number',
+                    'StringValue': phone_number
+                },
+                'name': {
+                    'DataType': 'String',
+                    'StringValue': name
+                },
+                'preferred_location': {
+                    'DataType': 'String',
+                    'StringValue': preferred_location
+                },
+                'preferred_job_title': {
+                    'DataType': 'String',
+                    'StringValue': preferred_job_title
+                },
+                'expected_salary': {
+                    'DataType': 'String',
+                    'StringValue': expected_salary
+                },
+                'cv_id': {
+                    'DataType': 'String',
+                    'StringValue': cv_id
+                },
+            }
+        )
+        print(f"Message sent to SNS, MessageId: {sns_response['MessageId']}")
+        return {"status": "Message sent to SNS successfully", "MessageId": sns_response['MessageId']}
+    
+    except (BotoCoreError, ClientError) as error:
+        print(f"Failed to publish message to SNS: {error}")
+        raise HTTPException(status_code=500, detail="Failed to send message to SNS")
+    
+@app.post("/backend/snsJobPreferrences", status_code=status.HTTP_200_OK)
+async def sns_job_preferrances(request: Request):
+    headers = request.headers
+    message_type = headers.get("x-amz-sns-message-type")
+
+    if not message_type:
+        raise HTTPException(status_code=400, detail="Invalid message type header")
+
+    body = await request.json()
+
+    # Check if it's a SubscriptionConfirmation message
+    if message_type == "SubscriptionConfirmation" and body['SubscribeURL']:
+        # Confirm the subscription
+        response = requests.get(body['SubscribeURL'])
+        if response.status_code == 200:
+            print("Subscription confirmed.")
+        else:
+            print("Failed to confirm subscription.")
+        return {"status": "Subscription confirmation handled"}
+
+    # Handle Notification message
+    elif message_type == "Notification":
+        # Retrieve contactId and flowId from MessageAttributes
+        message_attributes = body['MessageAttributes'] or {}
+        contact_id = message_attributes.get('contact_Id', {}).get('Value')
+        user_id = message_attributes.get('user_id', {}).get('Value')
+        flow_id = message_attributes.get('flow_Id', {}).get('Value')
+        phone_number = message_attributes.get('phone_number', {}).get('Value')
+        name = message_attributes.get('name', {}).get('Value')
+        preferred_location = message_attributes.get('preferred_location', {}).get('Value')
+        preferred_job_title = message_attributes.get('preferred_job_title', {}).get('Value')
+        expected_salary = message_attributes.get('expected_salary', {}).get('Value')
+        cv_id = message_attributes.get('cv_id', {}).get('Value')
+        add_job_preferrance_service(user_id, phone_number, name, preferred_location, preferred_job_title, expected_salary, cv_id)
+        response =  await send_to_glific_api(flow_id , contact_id,"job_preferrance_status")
+        print("sent to glific successfully: ",response)
+    # If unknown message type, return 400 error
+    else:
+        raise HTTPException(status_code=400, detail="Unknown message type")
+    
+@app.post("/backend/jobs/refine",status_code=status.HTTP_200_OK)
+async def refine_job_preferrance(req: Request):
+    try:
+        data = await req.json()
+        user_id = data.get('user_id')
+        job_feedback = data.get('job_feedback')
+        flow_id = data.get('flow_id')
+        contact_id = data.get('contact_id')
+        sns_response = sns_client.publish(
+            TopicArn=SNS_TOPIC_JOB_REFINE_ARN,
+            Message="Okey",
+            MessageAttributes={
+                'user_id': {
+                    'DataType': 'Number',
+                    'StringValue': user_id
+                },
+                'flow_Id': {
+                    'DataType': 'Number',
+                    'StringValue': flow_id
+                },
+                'contact_Id': {
+                    'DataType': 'Number',
+                    'StringValue': contact_id
+                },
+                'job_feedback': {
+                    'DataType': 'String',
+                    'StringValue': job_feedback
+                }
+            }
+        )
+        print(f"Message sent to SNS, MessageId: {sns_response['MessageId']}")
+        return {"status": "Message sent to SNS successfully", "MessageId": sns_response['MessageId']}
+    
+    except (BotoCoreError, ClientError) as error:
+        print(f"Failed to publish message to SNS: {error}")
+        raise HTTPException(status_code=500, detail="Failed to send message to SNS")
+    
+@app.post("/backend/snsJobRefine", status_code=status.HTTP_200_OK)
+async def sns_refine_job_preferrances(request: Request):
+    headers = request.headers
+    message_type = headers.get("x-amz-sns-message-type")
+
+    if not message_type:
+        raise HTTPException(status_code=400, detail="Invalid message type header")
+
+    body = await request.json()
+
+    # Check if it's a SubscriptionConfirmation message
+    if message_type == "SubscriptionConfirmation" and body['SubscribeURL']:
+        # Confirm the subscription
+        response = requests.get(body['SubscribeURL'])
+        if response.status_code == 200:
+            print("Subscription confirmed.")
+        else:
+            print("Failed to confirm subscription.")
+        return {"status": "Subscription confirmation handled"}
+
+    # Handle Notification message
+    elif message_type == "Notification":
+        # Retrieve contactId and flowId from MessageAttributes
+        message_attributes = body['MessageAttributes'] or {}
+        contact_id = message_attributes.get('contact_Id', {}).get('Value')
+        user_id = message_attributes.get('user_id', {}).get('Value')
+        flow_id = message_attributes.get('flow_Id', {}).get('Value')
+        job_feedback = message_attributes.get('job_feedback', {}).get('Value')
+        refine_job_feedback(user_id, job_feedback)
+        print("refined job feedback successfully")
+        jobs = recommend_jobs_service(user_id,2)
+        response =  await send_to_glific_api(flow_id , contact_id,jobs,"job_results")
+        print("sent to glific successfully: ",response)
+    # If unknown message type, return 400 error
+    else:
+        raise HTTPException(status_code=400, detail="Unknown message type")
+    
+@app.get("/backend/jobs/list-more/{user_id}",status_code=status.HTTP_200_OK)
+async def list_more_jobs(user_id: str):
+    try:
+        credits_info = check_user_credits(user_id)
+        number_of_jobs = credits_info["number_of_jobs"]
+        credits = credits_info["credits"]
+        print("credits: ",credits,"number_of_jobs: ",number_of_jobs)  
+        if credits <= 0 or number_of_jobs == 0:
+            return {"message": "You have no credits left. Please purchase more credits to continue."}
+
+        number_of_jobs = min(number_of_jobs, 3)
+        jobs = recommend_jobs_service(user_id, number_of_jobs)
+
+        updtaed_credits = max(credits - 10*number_of_jobs , 0)
+        update_user_credits(user_id, updtaed_credits)
+
+        return {"message": jobs , "credits":updtaed_credits}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred: {str(e)}"
+        )
+    
+@app.get("/backend/jobs/check_credits/{user_id}",status_code=status.HTTP_200_OK)
+async def check_credits(user_id: str):
+
+    credits_info = check_user_credits(user_id)
+    return {"permit":credits_info["permitted"],"credits":credits_info["credits"]}   
+
+@app.get("/backend/jobs/{metadata}", status_code=status.HTTP_200_OK)
+def get_job(metadata: str):
+    job_id = metadata.split("_")[0]
+    phone_number = metadata.split("_")[1]
+    url = get_job_url_by_id_service(job_id)
+    if not url:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job_activity_log_service(job_id, phone_number)
+    return RedirectResponse(url=url)
+    
+
+@app.post("/backend/jobAssistanceGPT",status_code=status.HTTP_200_OK)
+async def job_assistance_GPT(req: Request):
+    try:
+        data = await req.json()
+        job_preferrance = data['preference']
+        flow_id = data['flow_id']
+        contact_id = data['contact_id']
+        query_str = data['query']
+        sns_response = sns_client.publish(
+            TopicArn=SNS_JOB_ASSISTANCE_GPT_ARN,
+            Message="Okey",
+            MessageAttributes={
+                'job_preferrance': {
+                    'DataType': 'String',
+                    'StringValue': job_preferrance
+                },
+                'flow_Id': {
+                    'DataType': 'Number',
+                    'StringValue': flow_id
+                },
+                'contact_Id': {
+                    'DataType': 'Number',
+                    'StringValue': contact_id
+                },
+                'query_str': {
+                    'DataType': 'String',
+                    'StringValue': query_str
+                }
+            }
+        )
+        print(f"Message sent to SNS, MessageId: {sns_response['MessageId']}")
+        return {"status": "Message sent to SNS successfully", "MessageId": sns_response['MessageId']}
+    
+    except (BotoCoreError, ClientError) as error:
+        print(f"Failed to publish message to SNS: {error}")
+        raise HTTPException(status_code=500, detail="Failed to send message to SNS")
+    
+@app.post("/backend/snsJobAssistanceGPT", status_code=status.HTTP_200_OK)
+async def sns_refine_job_preferrances(request: Request):
+    headers = request.headers
+    message_type = headers.get("x-amz-sns-message-type")
+
+    if not message_type:
+        raise HTTPException(status_code=400, detail="Invalid message type header")
+
+    body = await request.json()
+
+    # Check if it's a SubscriptionConfirmation message
+    if message_type == "SubscriptionConfirmation" and body['SubscribeURL']:
+        # Confirm the subscription
+        response = requests.get(body['SubscribeURL'])
+        if response.status_code == 200:
+            print("Subscription confirmed.")
+        else:
+            print("Failed to confirm subscription.")
+        return {"status": "Subscription confirmation handled"}
+
+    # Handle Notification message
+    elif message_type == "Notification":
+        # Retrieve contactId and flowId from MessageAttributes
+        message_attributes = body['MessageAttributes'] or {}
+        contact_id = message_attributes.get('contact_Id', {}).get('Value')
+        job_preferrance = message_attributes.get('job_preferrance', {}).get('Value')
+        flow_id = message_attributes.get('flow_Id', {}).get('Value')
+        query_str = message_attributes.get('query_str', {}).get('Value')
+        jobs = job_assistance_gpt_service(job_preferrance,query_str)
+        response =  await send_to_glific_api(flow_id , contact_id,jobs,"job_assistance")
         print("sent to glific successfully: ",response)
     # If unknown message type, return 400 error
     else:

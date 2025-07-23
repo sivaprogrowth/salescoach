@@ -254,26 +254,8 @@ def generate_QNA(title , objective , no_of_questions , idx):
     try:
         input  = title+"."+objective
         docs = find_match(input, idx)
+        docs = ' '.join(docs.split()[:6000])  # limit to 1000 words
 
-        format = """
-                {
-                    "quiz": [
-                        {
-                            "question": "Your question here",
-                            "options": "1) Option A, 2) Option B, 3) Option C"
-                        },
-                        {
-                            "question": "Another question here",
-                            "options": "1) Option X, 2) Option Y, 3) Option Z"
-                        }
-                    ],
-                    "answers": {
-                        "1": "1",
-                        "2": "1"
-                    }
-                }
-                """
-        
         # Prepare prompt for OpenAI completion
         prompt = f"""You are an AI assessment generator. Use the provided title, objective, and retrieved data to create a multiple-choice quiz. Follow these instructions carefully:
 
@@ -285,16 +267,30 @@ def generate_QNA(title , objective , no_of_questions , idx):
         Title:{title}
         Objective:{objective}
         retrieved data:{docs}
-        Output Format:{format}
+        ### Output Format (STRICT):
+        {{
+            "quiz": [
+                {{
+                    "question": "Your question here",
+                    "options": "1) Option A, 2) Option B, 3) Option C",
+                    "answer": "1"
+                }},
+                {{
+                    "question": "Another question here",
+                    "options": "1) Option X, 2) Option Y, 3) Option Z",
+                    "answer": "1"
+                }}
+            ]
+        }}
 
-        follow the output format strictly . 
+        Output ONLY a valid JSON in the exact structure shown below. Do not add explanations or commentary. 
         """
             
         # Get response from OpenAI's completion model
         completion = client.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=150
+            temperature=0,
         )
         print("OpenAI response received")
         res = completion.choices[0].message.content
@@ -309,12 +305,13 @@ def generate_QNA(title , objective , no_of_questions , idx):
             }
             for item in quiz_data['quiz']
         ]
-        answers_str = json.dumps(list(quiz_data['answers']))
+        answers = [item["answer"] for item in quiz_data["quiz"]]
+        answers_str = json.dumps(answers)
         return formatted_questions , answers_str
 
     except (json.JSONDecodeError, KeyError, Exception) as e:
         print(f"Error occurred: {e}")
-        return generate_QNA(title, objective, no_of_questions, idx)
+        return None, None
 
 
 def download_audio(url, output_file, output_format="mp3"):
@@ -374,7 +371,8 @@ def transcribe():
     audio_file= open("reply2.wav", "rb")
     transcription = client.audio.transcriptions.create(
     model="whisper-1", 
-    file=audio_file
+    file=audio_file,
+    language="en"
     )
     print(transcription.text)
     return transcription.text
@@ -444,6 +442,73 @@ def analyze_cv_with_gpt(text, prompt):
         messages=[
             {"role": "system", "content": f"You are an expert CV reviewer. {prompt}"},
             {"role": "user", "content": text}
+        ]
+    )
+
+    return response.choices[0].message.content.strip()
+
+def cover_letter_with_gpt(cv, jd):
+    
+    response = client.chat.completions.create(
+        model="gpt-4-turbo",
+        messages=[
+            {"role": "system", "content": f"You are an expert Cover Letter writer. Write a cover letter for the following job description:\n\n{jd}. Use the provided CV to tailor the cover letter."},
+            {"role": "user", "content": cv}
+        ]
+    )
+
+    return response.choices[0].message.content.strip()
+
+def job_title_with_gpt(cv):
+    
+    response = client.chat.completions.create(
+        model="gpt-4-turbo",
+        messages=[
+            {"role": "system", "content": "You are an AI expert at analyzing CVs. Identify the job title based on the provided CV. Just is needed in bullt points"},
+            {"role": "user", "content": cv}
+        ]
+    )
+
+    return response.choices[0].message.content.strip()
+
+def classify_job_preferences_gpt(field_str):
+    function_schema = {
+        "name": "classify_job_preferences",
+        "description": "Classifies job preferences into structured data.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "Preferred_Location": {"type": "array", "items": {"type": "string"}, "description": "The geographical locations where the candidate prefers to work"},
+                "Preferred_Job_Title": {"type": "array", "items": {"type": "string"}, "description": "The roles or job titles the candidate is seeking"},
+                "Expected_Salary": {"type": "number", "description": "The lowest salary the candidate expects"}
+            },
+            "required": ["Preferred_Location", "Preferred_Job_Title", "Expected_Salary"]
+        }
+    }
+
+    response = client.chat.completions.create(
+        model="gpt-4-turbo",
+        messages=[
+            {"role": "system", "content": "You are an AI expert at classifying job preferences."},
+            {"role": "user", "content": f"Classify the following job preferences:\n\n{field_str}"}
+        ],
+        functions=[function_schema],
+        function_call={"name": "classify_job_preferences"}
+    )
+
+    classified_preferences = json.loads(response.choices[0].message.function_call.arguments)
+    return classified_preferences
+
+def job_assistance_gpt(job_preferrance, query_str):
+    prompt = f"""Goal: Think like an experienced career counsellor for 13-18 year old young girls in India. These girls come from lower income families and need guidance on making career choices. Please advise them on how to become {job_preferrance} and also provide them with some general advice regarding "{query_str}">
+Return Format: Give up to 100 words describing all the areas of the advice. Use bullet points where necessary but also have formatted sections. Please give in English and Hindi languages.
+Warnings: Be careful to make sure that the text should be simple, doesn't sound like AI generated and don't hallucinate. Also, follow ethical guidelines when dealing with adolescent girls. Be culturally sensitive and don't give biased advice based on religion, caste and other demographic details."""
+    
+    response = client.chat.completions.create(
+        model="gpt-4-turbo",
+        messages=[
+            {"role": "system", "content": f"You are an expert job assistant. {prompt} {query_str}"},
+            {"role": "user", "content": job_preferrance}
         ]
     )
 

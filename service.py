@@ -1,3 +1,4 @@
+import uuid
 from dotenv import load_dotenv
 from fastapi import HTTPException
 from util import *
@@ -10,6 +11,7 @@ DATABASE = os.getenv('DATABASE')
 PASSWD = os.getenv('PASSWD')
 USER = os.getenv('DB_USER')
 HOST = os.getenv('HOST')
+print(DATABASE)
 connection = mysql.connector.connect(
     user = USER,
     host = HOST,
@@ -168,7 +170,6 @@ def get_all_courses_service(company_id, date=None, latest_added=None):
 
     return formatted_courses
 
-
 # CRUD functions for lessons
 def create_lesson_service(data):
     query = """
@@ -181,7 +182,6 @@ def create_lesson_service(data):
     ))
     connection.commit()
     return db.lastrowid
-
 
 def get_lessons_service(course_id):
     """
@@ -423,7 +423,6 @@ def delete_assessment_service(assessment_id):
     db.execute(query, (assessment_id,))
     connection.commit()
 
-
 # CRUD functions for feedbacks
 def create_feedback_service(data):
     query = """
@@ -657,7 +656,7 @@ def get_feedback_questions_service(course_id):
     """
     # Query to fetch feedback questions
     query = """
-    SELECT feedback_question 
+    SELECT feedback_question , id
     FROM feedbacks 
     WHERE course_id = %s
     """
@@ -673,7 +672,6 @@ def get_feedback_questions_service(course_id):
         message += f"{idx}. {feedback[0]}\n"
 
     return {"message":message}
-
 
 def add_feedback_service(course_id,feedback_question,feedback_question_id, user_id, feedback):
     """
@@ -888,7 +886,7 @@ def get_dashboard_data_service(company_id):
         userCount = get_user_count_by_company_service(company_id)
         courseCount = get_course_count_by_company_service(company_id)
         assessmentCount = get_assessment_count_by_company_service(company_id)
-        trainingCompletionRate = 80  # You can calculate this based on your logic
+        trainingCompletionRate = 0  # You can calculate this based on your logic
         userCountByCity = get_user_count_by_city(company_id)
         feedbackInfo = get_feedback_for_company(company_id)
 
@@ -1003,43 +1001,303 @@ def get_lesson_content_type_service(lesson_id: int):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
+def get_cv_feedback(user_id):
+    query = """
+        SELECT *
+        FROM user_cv_data
+        WHERE user_id = %s
+        ORDER BY created_at DESC
+        LIMIT 1
+        """
+    # Ensure any previous result is consumed
+    while db.nextset():  # Use nextset to process all pending results
+        pass
+    db.execute(query, (user_id,))
+    result = db.fetchone()
 
-
-def get_cv_feedback(pdf_url):
-    
-    pdf_stream = download_pdf_from_url(pdf_url)
-    cv_text = extract_text_from_pdf(pdf_stream)
-    sections = classify_sections_gpt(cv_text)
-
-    # Define aspect-specific text mappings
     aspect_text_mapping = {
-        "Clarity": cv_text,  
-        "Professional Summary": sections.get("Summary", ""),
-        "Skills & Work Experience": "\n".join([
-            sections.get("Experience", ""), 
-            sections.get("Projects", ""), 
-            sections.get("Certifications", "")
-        ]),
-        "Formatting of the Document": cv_text,  
-        "Minor Points": cv_text  
-    }
+            "Clarity": result[2],  
+            "Professional Summary": result[4],
+            "Skills and Work Experience": "\n".join([
+                item for item in [result[6], result[8], result[9]] if item
+            ]),
+            "Formatting of the Document": result[2],  
+            "Minor Points": result[2] 
+        }
+
 
     # Define aspect-specific prompts
     aspect_prompts = {
         "Clarity": "Analyze the clarity of the following CV text. Identify any ambiguous or unclear sections and suggest improvements. Give the output in 50 words only",
         "Professional Summary": "Evaluate the professional summary of this CV. Is it concise, impactful, and relevant? Suggest improvements if necessary.Give the output in 50 words only",
-        "Skills & Work Experience": "Analyze the skills and work experience sections of this CV. Identify missing details, redundancies, or areas for enhancement.Give the output in 50 words only",
+        "Skills and Work Experience": "Analyze the skills and work experience sections of this CV. Identify missing details, redundancies, or areas for enhancement.Give the output in 50 words only",
         "Formatting of the Document": "Review the formatting of this CV. Is it structured well, visually appealing, and professional? Suggest improvements.Give the output in 50 words only",
         "Minor Points": "Check for minor issues in this CV, such as typos, inconsistencies, missing details, or unnecessary information.Give the output in 50 words only"
     }
 
     feedback = {}
-
     for aspect, text in aspect_text_mapping.items():
+        print(f"Analyzing aspect: {aspect}")
+        print("Text: ", text)
         prompt = aspect_prompts.get(aspect, "Analyze the following CV section and provide feedback.")
-        feedback[aspect] = analyze_cv_with_gpt(text, prompt)  # Pass both text and prompt
+        # Convert aspect to lowercase and replace spaces with underscores
+        aspect_key = aspect.lower().replace(' ', '_')
+        print(aspect_key)
+        feedback[aspect_key] = analyze_cv_with_gpt(text, prompt)  # Pass both text and prompt
 
-    # Formatting the consolidated feedback
-    consolidated_feedback = "\n\n".join([f"**{key}**:\n{value}" for key, value in feedback.items()])
+    # # Formatting the consolidated feedback
+    # consolidated_feedback = "\n\n".join([f"**{key}**:\n{value}" for key, value in feedback.items()])
     
-    return consolidated_feedback
+    return feedback
+
+def upload_cv_to_db_service(pdf_url, user_id, id):
+
+    pdf_stream = download_pdf_from_url(pdf_url)
+    cv_text = extract_text_from_pdf(pdf_stream)
+    sections = classify_sections_gpt(cv_text)
+
+    query = """
+        INSERT INTO user_cv_data (id, user_id, cv_text, header, summary, education, experience, 
+                                  skills, certificate, projects, additional_info)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+    # Replace None or empty fields with empty strings
+    user_id = user_id if user_id else ""
+    cv_text = cv_text if cv_text else ""
+    header = sections.get("Header", "")
+    summary = sections.get("Summary", "")
+    education = sections.get("Education", "")
+    experience = sections.get("Experience", "")
+    skills = sections.get("Skills", "")
+    certificate = sections.get("Certifications", "")
+    projects = sections.get("Projects", "")
+    additional_info = sections.get("Additional_Info", "")
+    # Ensure any previous result is consumed
+    while db.nextset():  # Use nextset to process all pending results
+        pass
+    db.execute(query, (id, user_id, cv_text, header, summary, education, experience, skills, certificate, projects, additional_info))
+    connection.commit()
+    print("CV data uploaded successfully")
+
+def get_cover_letter_service(jd , user_id):
+    query = """
+        SELECT cv_text
+        FROM user_cv_data
+        WHERE user_id = %s
+        ORDER BY created_at DESC
+        LIMIT 1
+        """
+    db.execute(query, (user_id,))
+    cv = db.fetchone()[0]
+
+    if not cv:
+        raise HTTPException(status_code=404, detail="Data not found")
+    
+    return cover_letter_with_gpt(cv, jd)
+
+def get_job_title_service(user_id):
+    query = """
+        SELECT cv_text
+        FROM user_cv_data
+        WHERE user_id = %s
+        ORDER BY created_at DESC
+        LIMIT 1
+        """
+    db.execute(query, (user_id,))
+    cv = db.fetchone()[0]
+    if not cv:
+        raise HTTPException(status_code=404, detail="Data not found")
+    result = job_title_with_gpt(cv)
+    print(result)
+    return result
+
+def add_job_preferrance_service(data):
+    try:
+        print(data)
+        preferred_location = data.get('preferred_location', "")
+        preferred_job_title = data.get('preferred_job_title', "")
+        expected_salary = data.get('expected_salary', "")
+        cv_id = data.get('cv_id', "")
+        name = data.get('name', "")
+        phone_number = data.get('phone_number', "")
+
+        fields_str = f"preferred_location = {preferred_location},\npreferred_job_title = {preferred_job_title},\nexpected_salary = {expected_salary}"
+        preferrance  = classify_job_preferences_gpt(fields_str)
+        print(preferrance)
+        
+        # Convert the preferences to JSON format
+        preferred_locations_json = json.dumps(preferrance.get('Preferred_Location', []))
+        preferred_job_titles_json = json.dumps(preferrance.get('Preferred_Job_Title', []))
+        expected_salary = preferrance.get('Expected_Salary', "")
+
+        # Check if the phone number already exists
+        check_query = "SELECT COUNT(*) FROM users_job_assistance WHERE phone_number = %s"
+        db.execute(check_query, (phone_number,))
+        count = db.fetchone()[0]
+
+        if count > 0:
+            # Update the existing record
+            update_query = """
+            UPDATE users_job_assistance
+            SET name = %s, preferred_locations = %s, preferred_job_titles = %s, expected_salary = %s, cv_id = %s
+            WHERE phone_number = %s
+            """
+            values = (
+                name,
+                preferred_locations_json,
+                preferred_job_titles_json,
+                expected_salary,
+                cv_id,
+                phone_number
+            )
+            db.execute(update_query, values)
+        else:
+            # Insert a new record
+            insert_query = """
+            INSERT INTO users_job_assistance (user_id, phone_number, name, preferred_locations, preferred_job_titles, expected_salary, cv_id, credits)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, 70)
+            """
+            values = (
+                uuid.uuid4().hex,
+                phone_number,
+                name,
+                preferred_locations_json,
+                preferred_job_titles_json,
+                expected_salary,
+                cv_id
+            )
+            db.execute(insert_query, values)
+
+        connection.commit()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    
+def recommend_jobs_service(phone_number, count):
+# Get user preferences
+    db.execute("SELECT expected_salary, preferred_locations, preferred_job_titles FROM users_job_assistance WHERE phone_number = %s", (phone_number,))
+    user_pref = db.fetchone()
+    
+    if not user_pref:
+        raise HTTPException(status_code=404, detail="User preferences not found")
+    
+    query = """
+        WITH user_pref AS (
+            SELECT expected_salary AS salary, preferred_locations AS location, preferred_job_titles AS role 
+            FROM users_job_assistance 
+            WHERE phone_number = %s
+        ) 
+        SELECT * FROM jobs 
+        WHERE 
+            (location = (SELECT location FROM user_pref) 
+            OR (SELECT COUNT(*) FROM jobs WHERE location = (SELECT location FROM user_pref)) = 0) 
+            AND 
+            (role = (SELECT role FROM user_pref) 
+            OR (SELECT COUNT(*) FROM jobs WHERE role = (SELECT role FROM user_pref)) = 0) 
+            AND 
+            salary >= (SELECT salary FROM user_pref)
+        ORDER BY 
+            CASE 
+                WHEN location = (SELECT location FROM user_pref) 
+                AND role = (SELECT role FROM user_pref) THEN 1
+                WHEN location = (SELECT location FROM user_pref) THEN 2
+                WHEN role = (SELECT role FROM user_pref) THEN 3
+                ELSE 4
+            END,
+            salary DESC 
+        LIMIT %s;
+    """
+
+    db.execute(query, (phone_number,count))
+    jobs = db.fetchall()
+    formatted_jobs = ""
+    for job in jobs:
+        url = f"https://app.yogyabano.com/jobs/{job[0]}_{phone_number}"
+        formatted_jobs += f"title: {job[1]}\n"
+        formatted_jobs += f"description: {job[4]}\n"
+        formatted_jobs += f"salary: {job[2]}\n"
+        formatted_jobs += f"location: {job[3]}\n"
+        formatted_jobs += f"url: {url}\n\n"
+
+    return formatted_jobs
+
+def refine_job_feedback(user_id, job_feedback):
+    try:
+        # Query to extract user preferences
+        query = """
+        SELECT preferred_locations, preferred_job_titles, expected_salary 
+        FROM users_job_assistance 
+        WHERE phone_number = %s
+        """
+        db.execute(query, (user_id,))
+        user_pref = db.fetchone()
+        if not user_pref:
+            raise HTTPException(status_code=404, detail="User preferences not found")
+
+        preferred_location = user_pref[0]
+        preferred_job_title = user_pref[1]
+        expected_salary = user_pref[2]
+        fields_str = f"preferred_location = {preferred_location},\npreferred_job_title = {preferred_job_title},\nexpected_salary = {expected_salary},\nfeedback = {job_feedback}"
+        refined_pref = classify_job_preferences_gpt(fields_str)
+
+        # Update the user preferences with refined classifications
+        query = """
+        UPDATE users_job_assistance 
+        SET preferred_locations = %s, preferred_job_titles = %s, expected_salary = %s 
+        WHERE phone_number = %s
+        """
+        values = (
+            refined_pref.get('preferred_location', preferred_location),
+            refined_pref.get('preferred_job_title', preferred_job_title),
+            refined_pref.get('expected_salary', expected_salary),
+            user_id
+        )
+        db.execute(query, values)
+        connection.commit()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    
+def get_user_credits(user_id):
+    try:
+        query = "SELECT credits FROM users_job_assistance WHERE phone_number = %s"
+        db.execute(query, (user_id,))
+        result = db.fetchone()
+        return result[0]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving user credits: {str(e)}")
+
+def check_user_credits(user_id):
+    credits = get_user_credits(user_id)
+    if (credits / 10) >= 1:
+        return {"permitted": "Yes", "credits": credits, "number_of_jobs": (credits / 10)}
+    else:
+        return {"permitted": "No", "credits": credits, "number_of_jobs": 0}
+    
+def update_user_credits(user_id, credits):
+    query = "UPDATE users_job_assistance SET credits = %s WHERE phone_number = %s"
+    db.execute(query, (credits, user_id))
+    connection.commit()
+    
+def job_assistance_gpt_service(job_preferrance,query_str):
+    try:
+        # Generate job assistance response using GPT
+        response = job_assistance_gpt(job_preferrance, query_str)
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating job assistance: {str(e)}")
+    
+def get_job_url_by_id_service(job_id):
+
+    query = "SELECT apply_url FROM jobs WHERE id = %s"
+    db.execute(query, (job_id,))
+    result = db.fetchone()[0]
+    return result
+
+def job_activity_log_service(job_id, phone_number):
+    try:
+        # Insert a new job activity log entry
+        query = "INSERT INTO job_activity_log (job_id, phone_number, activity_type) VALUES (%s, %s, %s)"
+        values = (job_id, phone_number, "Viewed")
+        db.execute(query, values)
+        connection.commit()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error inserting job activity log: {str(e)}")

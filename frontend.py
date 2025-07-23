@@ -1,37 +1,29 @@
 import streamlit as st
 import requests
+from serverdb import get_index_list_glific
 from util import *
-import queue, wave
-import sounddevice as sd
-import numpy as np
+import os
 from audio_recorder_streamlit import audio_recorder
 from dotenv import load_dotenv
+
 load_dotenv()
 BASE_URL = os.getenv("BASE_URL")
 
 user_id = 'shariq'
-sample_rate = 44100
 
-def fetch_audio(text):
-    response = requests.post(f"{BASE_URL}/backend/generateAUD", json={"text": text})
+def fetch_audio(text,lang):
+    response = requests.post(f"{BASE_URL}/backend/generateAUD", json={"text": text,"lang":lang})
     if response.status_code == 200:
         return response.content
     else:
         st.write("Failed to fetch audio")
         return None
-    
-# Function to play audio in browser
+
 def play_audio(audio_data):
     if audio_data:
         save_wav_file("output.wav", audio_data)
-        # Display audio player in Streamlit
-        audio_bytes = open('output.wav', 'rb').read()
-        st.audio(audio_bytes, format='audio/wav')
-
-# Audio Recorder Integration
-def save_wav_file2(filename, audio_data):
-    with open(filename, 'wb') as f:
-        f.write(audio_data)
+        audio_bytes = open("output.wav", "rb").read()
+        st.audio(audio_bytes, format="audio/wav")
 
 # Custom CSS for styling (same as before)
 st.markdown("""
@@ -59,7 +51,7 @@ st.markdown("""
         max-width: 60%;
         float: right;
         margin-bottom: 10px;
-        clear: both;`
+        clear: both;
         color: #FFFFFF;
     }
     .ai-message {
@@ -76,77 +68,94 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-#st.title("Welcome to AI Powered Sales Coach")
+# Initialize session state variables if not present
+if "start" not in st.session_state:
+    st.session_state["start"] = False
+if "uploaded_file" not in st.session_state:
+    st.session_state["uploaded_file"] = None
+if "selected_option" not in st.session_state:
+    st.session_state["selected_option"] = None
+if "index_initialized" not in st.session_state:
+    st.session_state["index_initialized"] = False
+if "chat_history" not in st.session_state:
+    st.session_state["chat_history"] = []
+if "language" not in st.session_state:
+    st.session_state["language"] = "English"
 
+st.title("Welcome to AI Powered Sales Coach")
+# Add language selection dropdown
+st.sidebar.title("Select Input Medium")
+language_options = ["English", "Hindi", "Telugu"]
+selected_language = st.sidebar.selectbox("Select Language", language_options)
 
-#st.title("Welcome to AI Powered Sales Coach")
+if selected_language:
+    # Store selected language in session state
+    st.session_state["language"] = selected_language
 
-if 'start' not in st.session_state:
-    st.session_state['start'] = False
-
-st.title('Welcome to AI Powered Sales Coach')
-# Step 1: Drop-down Selector (same as before)
+# Step 1: Drop-down Selector
 NEW_INDEX = "(New index)"
-options = get_index_list().names() + [NEW_INDEX]
-option = st.selectbox("Select an option", options)
+options = get_index_list_glific() + [NEW_INDEX]
 
-# Upload file and handle file upload logic (same as before)
+option = st.selectbox("Select an option", options, index=options.index(st.session_state["selected_option"]) if st.session_state["selected_option"] in options else 0)
+
 if option == NEW_INDEX:
-    otherOption = st.text_input("Enter your other option...")
+    otherOption = st.text_input("Name the new File")
     if otherOption:
-        selection = otherOption
-        index_init(otherOption, 1536)
-        st.info(f":white_check_mark: New index {otherOption} created!")
+        st.session_state["selected_option"] = otherOption  # Store selection
+        uploaded_file = st.file_uploader("Upload a file", type=["txt", "pdf", "docx"])
 
-    uploaded_file = st.file_uploader("Upload a file", type=["txt", "pdf", "docx"])
-    if uploaded_file is not None:
-        st.write("File uploaded successfully!")
-        if st.button("Generate Responses"):
-            name = uploaded_file.name
-            raw_text = convert_pdf_to_txt_file(uploaded_file)
-            response = requests.post(f"{BASE_URL}/backend/createQuestionAnswer", json={"index": otherOption, "text": raw_text})
+        if uploaded_file is not None:
+            st.session_state["uploaded_file"] = uploaded_file  # Store the file
+            st.write("File uploaded successfully!")
+            st.info(f":white_check_mark: New index {otherOption} created!")
+            st.info(f":white_check_mark: Now Creating QnA")
+            name = st.session_state["uploaded_file"].name
+            raw_text = extract_text_from_pdf(st.session_state["uploaded_file"].read())
+            response = requests.post(f"{BASE_URL}/backend/createQuestionAnswer", json={"index": otherOption, "text": raw_text,"lang":st.session["language"]})
             st.write(f"File upload status: {response.status_code}")
-    option = otherOption
 
-st.write(f"Selected option: {option}")
+else:
+    st.session_state["selected_option"] = option
 
-# Start Test Button (same as before)
-if st.button('Start Test'):
-    print("fuck")
-    st.session_state['start'] = True
+st.write(f"Selected option: {st.session_state['selected_option']}")
 
-if st.session_state['start']:
-    if option:
-        response = requests.post(f"{BASE_URL}/backend/fetch_questions/{option}")
-        if response.json()['message'] == "Ok":
+# Start Test Button
+if st.button("Start Test"):
+    st.session_state["start"] = True
 
-            response = requests.post(f"{BASE_URL}/backend/fetch_chats", json={'index': option, 'user_id': 'shariq'}).json()
-            st.session_state['chat_history'] = response['chat']
+if st.session_state["start"]:
+    if st.session_state["selected_option"]:
+        response = requests.post(f"{BASE_URL}/backend/fetch_questions/{st.session_state['selected_option']}")
+        if response.json().get("message") == "Ok":
+            chat_response = requests.post(f"{BASE_URL}/backend/fetch_chats", json={"index": st.session_state["selected_option"], "user_id": user_id}).json()
+            st.session_state["chat_history"] = chat_response["chat"]
+
             st.write("### Audio Recorder")
             recorder_audio = audio_recorder(text="Click to Record / Stop")
 
-            if recorder_audio:  # If audio is captured
+            if recorder_audio:
                 audio_path = "reply2.wav"
-                save_wav_file2(audio_path, recorder_audio)
+                with open(audio_path, "wb") as f:
+                    f.write(recorder_audio)
                 st.write("Audio recording saved!")
 
-                response = requests.post(f"{BASE_URL}/backend/stopRecording",json={'index': option})
+                response = requests.post(f"{BASE_URL}/backend/stopRecording", json={"index": st.session_state["selected_option"]})
 
                 if response.status_code == 200:
                     result = response.json()
-                    st.session_state['chat_history'] = result['chat']
+                    st.session_state["chat_history"] = result["chat"]
                 else:
                     st.write("Failed to process recording.")
 
-            # Display chat history (same as before)
-            if st.session_state['chat_history']:
-                lst = len(st.session_state['chat_history']) - 1
-                audio_data = fetch_audio(st.session_state['chat_history'][lst]['message'])
+            if st.session_state["chat_history"]:
+                lst = len(st.session_state["chat_history"]) - 1
+                audio_data = fetch_audio(st.session_state["chat_history"][lst]["message"],st.session["language"])
                 play_audio(audio_data)
-                for chat in st.session_state['chat_history']:
+
+                for chat in st.session_state["chat_history"]:
                     if chat["type"] == "user":
                         st.markdown(f'<div class="user-message">{chat["message"]}</div>', unsafe_allow_html=True)
                     else:
                         st.markdown(f'<div class="ai-message">{chat["message"]}</div>', unsafe_allow_html=True)
         else:
-            st.write("Please upload a file to fetch relevant question")
+            st.write("Please upload a file to fetch relevant questions.")
