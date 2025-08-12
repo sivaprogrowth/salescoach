@@ -4,8 +4,6 @@ from fastapi.middleware.cors import CORSMiddleware
 import scipy.io.wavfile as wavfile  # To save audio in .wav format
 from openai import OpenAI
 from util import *
-import torch
-import whisper
 import pyaudio
 import os , json
 import mysql.connector
