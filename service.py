@@ -279,12 +279,17 @@ def delete_lesson_service(lesson_id):
 
 # CRUD functions for assessments
 def create_assessment_service(data):
+    # First, fetch course_id from lessons
+    course_query = "SELECT course_id FROM lessons WHERE id = %s"
+    course_id = db.fetchone(course_query, (data['lesson_id'],))['course_id']
+
     query = """
-    INSERT INTO assessments (lesson_id, title, objective, number_of_questions, mcq_id , created_at, updated_at)
-    VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
+    INSERT INTO assessments (lesson_id, course_id, title, objective, number_of_questions, mcq_id, created_at, updated_at)
+    VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
     """
     db.execute(query, (
-        data['lesson_id'], data['title'], data.get('objective'), data.get('number_of_questions'),data.get('mcq_id')
+        data['lesson_id'], course_id, data['title'], data.get('objective'),
+        data.get('number_of_questions'), data.get('mcq_id')
     ))
     connection.commit()
     return db.lastrowid
