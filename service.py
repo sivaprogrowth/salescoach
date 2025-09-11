@@ -281,7 +281,12 @@ def delete_lesson_service(lesson_id):
 def create_assessment_service(data):
     # First, fetch course_id from lessons
     course_query = "SELECT course_id FROM lessons WHERE id = %s"
-    course_id = db.fetchone(course_query, (data['lesson_id'],))['course_id']
+    db.execute(course_query, (data['lesson_id'],))
+    result = db.fetchone()   # <-- no arguments
+    if not result:
+        raise ValueError(f"No lesson found with id {data['lesson_id']}")
+
+    course_id = result['course_id'] if isinstance(result, dict) else result[0]
 
     query = """
     INSERT INTO assessments (lesson_id, course_id, title, objective, number_of_questions, mcq_id, created_at, updated_at)
