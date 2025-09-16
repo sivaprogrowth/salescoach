@@ -736,7 +736,7 @@ async def fetchChatVoice(req: Request):
 @app.post("/backend/publishTextRag",status_code=status.HTTP_200_OK)
 async def publish_to_sns_text_rag(request: Request):
     try:
-        
+        company_id = int(data["company_id")
         # Publish message to SNS with attributes
         current_datetime = datetime.now()
         datetime_string = current_datetime.strftime("%Y%m%d%H%M%S")
@@ -758,13 +758,13 @@ async def publish_to_sns_text_rag(request: Request):
 
         print("course title ",course_title)
         print("lesson name ",lesson_name)
-        idx = get_index_by_lesson(lesson_name)
+        idx = get_index_by_lesson(lesson_name, lesson_id)
         if product_details != "No details":
             result = await productQuery(request['message'],product_details)
             print(result)
         else:
             result  = await run_script(request['message'],idx.split(".")[-2])
-        course_id = get_course_id_by_name(course_title)
+        course_id = get_course_id_by_name(course_title, company_id)
         data = (
             result, # message
             datetime_string,  # transactionId
@@ -1211,20 +1211,21 @@ async def getCoursesGlific(req : Request):
             [f"{i+1}. {title}" for i, title in enumerate(course_titles)]
         )
         print("message is ",message)
-        return {"message":message}
+        return {"message":message,"company_id":company_id}
     except Exception as e:
         return HTTPException(status_code=500, detail= str(e))
 
 @app.post("/backend/getLessonsGlific",status_code=status.HTTP_200_OK)
 async def getLessonsGlific(req : Request):
     data = await req.json()
+    company_id = data["company_id"]
     course_number = int(data['course_number'])
     print("course number is ",course_number)
     courses_name = data['courses_name']
     print("courses name is ",courses_name)
     course_title = courses_name.split("\n")[course_number].split(".")[1].strip()
     print("course title is ",course_title)
-    course_id = get_course_id_by_name(course_title)
+    course_id = get_course_id_by_name(course_title, company_id)
     lessons = get_lessons_service(course_id)
     if not lessons:
         raise HTTPException(status_code=status.HTTP_200_OK, detail="Lesson not found")
@@ -1232,15 +1233,16 @@ async def getLessonsGlific(req : Request):
     message = "Lessons available to you are as follows:\n" + "\n".join(
         [f"{i+1}. {title}" for i, title in enumerate(lesson_titles)]
     )    
-    return {"message": message}
+    return {"message": message, "course_id":course_id}
 
 @app.post("/backend/getAssessmentsGlific",status_code=status.HTTP_200_OK)
 async def getAssessmentsGlific(req : Request):
     data = await req.json()
+    course_id = int(data["course_id"])
     lesson_number = int(data['lesson_number'])
     lessons_name = data['lessons_name']
     lesson_name = lessons_name.split("\n")[lesson_number].split(".")[1].strip()
-    lesson_id = get_lesson_id_by_name(lesson_name)
+    lesson_id = get_lesson_id_by_name(lesson_name, course_id)
     assessments = get_all_assessment_by_lesson_service(lesson_id)
     if not assessments:
         raise HTTPException(status_code=status.HTTP_200_OK, detail="Assessments not found")
@@ -1248,11 +1250,12 @@ async def getAssessmentsGlific(req : Request):
     message = "Assessments available to you are as follows:\n" + "\n".join(
         [f"{i+1}. {title}" for i, title in enumerate(assessment_titles)]
     )    
-    return {"message": message}
+    return {"message": message,"lesson_id":lesson_id}
 
 @app.post("/backend/getMCQGlific",status_code=status.HTTP_200_OK)
 async def getMCQGlific(req : Request):
     data = await req.json()
+    lesson_id = int(data["lesson_id"])
     assessment_number = int(data['assessment_number'])
     assessments_name = data['assessments_name']
     assessments_name = assessments_name.split("\n")[assessment_number].split(".")[1].strip()
@@ -1294,11 +1297,12 @@ async def compareAnswers(req: Request):
 @app.post("/backend/getFeedbackGlific",status_code=status.HTTP_200_OK)
 async def getFeedbackGlific(req : Request):
     data = await req.json()
+    company_id = int(data["company_id"])
     course_number = int(data['course_number'])
     courses_name = data['courses_name']
     course_title = courses_name.split("\n")[course_number].split(".")[1].strip()
     print(course_title)
-    course_id = get_course_id_by_name(course_title)
+    course_id = get_course_id_by_name(course_title,company_id)
     print(course_id)
     feedback = get_feedback_questions_service(course_id)
     print(feedback)
@@ -1416,10 +1420,11 @@ async def get_lesson_content_type(req:Request):
     API endpoint to retrieve the content type of a specific lesson.
     """
     data = await req.json()
+    course_id = int(data["course_id"])
     lesson_number = int(data['lesson_number'])
     lessons_name = data['lessons_name']
     lesson_name = lessons_name.split("\n")[lesson_number].split(".")[1].strip()
-    lesson_id = get_lesson_id_by_name(lesson_name)
+    lesson_id = get_lesson_id_by_name(lesson_name, course_id)
     try:
         content_type = get_lesson_content_type_service(lesson_id)
         return {"type":content_type}
