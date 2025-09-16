@@ -736,11 +736,11 @@ async def fetchChatVoice(req: Request):
 @app.post("/backend/publishTextRag",status_code=status.HTTP_200_OK)
 async def publish_to_sns_text_rag(request: Request):
     try:
-        company_id = int(data["company_id"])
         # Publish message to SNS with attributes
         current_datetime = datetime.now()
         datetime_string = current_datetime.strftime("%Y%m%d%H%M%S")
         request = await request.json()
+        company_id = int(request["company_id"])
 
         product_details = request.get('product_detail')
         if product_details is None:
