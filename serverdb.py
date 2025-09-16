@@ -1297,6 +1297,7 @@ async def compareAnswers(req: Request):
 @app.post("/backend/getFeedbackGlific",status_code=status.HTTP_200_OK)
 async def getFeedbackGlific(req : Request):
     data = await req.json()
+    print("company_id : ",data["company_id"])
     company_id = int(data["company_id"])
     course_number = int(data['course_number'])
     courses_name = data['courses_name']
