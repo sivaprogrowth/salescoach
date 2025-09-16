@@ -589,10 +589,11 @@ def get_course_id_by_name(course_name, company_id):
     query = """
     SELECT id 
     FROM courses 
-    WHERE LOWER(title) = LOWER(%s)
+    WHERE LOWER(title) = LOWER(%s) 
+      AND company_id = %s
     LIMIT 1
     """
-    db.execute(query, (course_name,))
+    db.execute(query, (course_name, company_id))
     result = db.fetchone()
     return result[0] if result else None
 
@@ -601,9 +602,10 @@ def get_lesson_id_by_name(lesson_name,course_id):
     SELECT id 
     FROM lessons 
     WHERE LOWER(title) = LOWER(%s)
+    AND course_id = %s
     LIMIT 1
     """
-    db.execute(query, (lesson_name,))
+    db.execute(query, (lesson_name,course_id))
     result = db.fetchone()
     return result[0] if result else None
 
@@ -612,9 +614,10 @@ def get_index_by_lesson(lesson_name, course_id):
     SELECT pdf 
     FROM lessons 
     WHERE LOWER(title) = LOWER(%s)
+    AND course_id = %s
     LIMIT 1
     """
-    db.execute(query, (lesson_name,))
+    db.execute(query, (lesson_name,course_id))
     result = db.fetchone()
     return result[0] if result else None
 
@@ -623,9 +626,10 @@ def get_assessment_id_by_name(assessment_name, lesson_id):
     SELECT id 
     FROM assessments 
     WHERE LOWER(title) = LOWER(%s)
+    AND lesson_id = %s
     LIMIT 1
     """
-    db.execute(query, (assessment_name,))
+    db.execute(query, (assessment_name,lesson_id))
     result = db.fetchone()
     return result[0] if result else None
 
