@@ -585,7 +585,7 @@ def get_MCQ_by_assessment_service(assessment_id: int):
     result = db.fetchone()
     return result
 
-def get_course_id_by_name(course_name):
+def get_course_id_by_name(course_name, company_id):
     query = """
     SELECT id 
     FROM courses 
@@ -596,7 +596,7 @@ def get_course_id_by_name(course_name):
     result = db.fetchone()
     return result[0] if result else None
 
-def get_lesson_id_by_name(lesson_name):
+def get_lesson_id_by_name(lesson_name,course_id):
     query = """
     SELECT id 
     FROM lessons 
@@ -607,7 +607,7 @@ def get_lesson_id_by_name(lesson_name):
     result = db.fetchone()
     return result[0] if result else None
 
-def get_index_by_lesson(lesson_name):
+def get_index_by_lesson(lesson_name, course_id):
     query = """
     SELECT pdf 
     FROM lessons 
@@ -618,7 +618,7 @@ def get_index_by_lesson(lesson_name):
     result = db.fetchone()
     return result[0] if result else None
 
-def get_assessment_id_by_name(assessment_name):
+def get_assessment_id_by_name(assessment_name, lesson_id):
     query = """
     SELECT id 
     FROM assessments 
