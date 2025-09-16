@@ -741,8 +741,7 @@ async def publish_to_sns_text_rag(request: Request):
         datetime_string = current_datetime.strftime("%Y%m%d%H%M%S")
         request = await request.json()
         company_id = int(request["company_id"])
-        print("lesson_id : ",request["lesson_id"])
-        lesson_id = int(request["lesson_id"])
+        course_id = int(request["course_id"])
 
         product_details = request.get('product_detail')
         if product_details is None:
@@ -760,7 +759,7 @@ async def publish_to_sns_text_rag(request: Request):
 
         print("course title ",course_title)
         print("lesson name ",lesson_name)
-        idx = get_index_by_lesson(lesson_name, lesson_id)
+        idx = get_index_by_lesson(lesson_name, course_id)
         if product_details != "No details":
             result = await productQuery(request['message'],product_details)
             print(result)
