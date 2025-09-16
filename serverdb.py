@@ -1259,7 +1259,7 @@ async def getMCQGlific(req : Request):
     assessment_number = int(data['assessment_number'])
     assessments_name = data['assessments_name']
     assessments_name = assessments_name.split("\n")[assessment_number].split(".")[1].strip()
-    assessment_id = get_assessment_id_by_name(assessments_name)
+    assessment_id = get_assessment_id_by_name(assessments_name, lesson_id)
     MCQ_id = get_MCQ_by_assessment_service(assessment_id)
     if not MCQ_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="MCQ not found")
