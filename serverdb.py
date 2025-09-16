@@ -741,6 +741,7 @@ async def publish_to_sns_text_rag(request: Request):
         datetime_string = current_datetime.strftime("%Y%m%d%H%M%S")
         request = await request.json()
         company_id = int(request["company_id"])
+        print("lesson_id : ",request["lesson_id"])
         lesson_id = int(request["lesson_id"])
 
         product_details = request.get('product_detail')
